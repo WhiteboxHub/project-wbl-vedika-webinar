@@ -1,0 +1,26 @@
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: false
+
+redis:
+  address: redis:6379
+
+keys:
+  devkey: secret
+
+logging:
+  level: info
+  sample: false
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 100
+
+turn:
+  enabled: false
