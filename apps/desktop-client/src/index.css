@@ -4,13 +4,29 @@
   --bg-color: #050505;
   --surface-color: rgba(23, 23, 23, 0.6);
   --surface-hover: rgba(38, 38, 38, 0.8);
-  --primary-color: #6366f1; /* Indigo */
-  --primary-hover: #4f46e5;
+  --primary-color: #7c3aed;
+  --primary-hover: #6d28d9;
+  --secondary-color: #06b6d4;
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
   --border-color: rgba(255, 255, 255, 0.1);
   --error-color: #ef4444;
   --success-color: #10b981;
+}
+
+/* Animated background orb */
+.bg-orb {
+  position: fixed;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.3), transparent 70%);
+  animation: orbFloat 8s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes orbFloat {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-30px) scale(1.05); }
 }
 
 * {

@@ -41,12 +41,36 @@ export class AuthService {
       expiresIn: '15m',
     });
 
-    // TODO: Send email with magic link
-    // For MVP, log the token
     this.logger.log(`Magic link token (DEV ONLY): ${token}`);
     this.logger.log(`Verify URL: http://localhost:3000/auth/verify?token=${token}`);
 
     return { token };
+  }
+
+  async login(email: string, password: string): Promise<{ accessToken: string; user: AuthUser }> {
+    const adminEmail = this.configService.get<string>('ADMIN_EMAIL') || 'admin@webinar.local';
+    const adminPassword = this.configService.get<string>('ADMIN_PASSWORD') || 'webinar123';
+
+    if (email.toLowerCase().trim() !== adminEmail || password !== adminPassword) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    // Find or create the admin user
+    let user = await this.userRepository.findOne({ where: { email: adminEmail } });
+    if (!user) {
+      user = this.userRepository.create({
+        email: adminEmail,
+        name: 'Admin Organizer',
+        role: UserRole.INSTRUCTOR,
+      });
+      await this.userRepository.save(user);
+    }
+
+    const accessToken = this.generateAccessToken(user);
+    return {
+      accessToken,
+      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    };
   }
 
   async verifyMagicLinkToken(token: string): Promise<VerifyTokenResponse> {

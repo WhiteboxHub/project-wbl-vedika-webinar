@@ -10,10 +10,26 @@ import {
   VerifyTokenResponse,
   AuthUser,
 } from '@webinar/shared';
+import { IsEmail, IsString, MinLength } from 'class-validator';
+
+class LoginDto {
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  @MinLength(1)
+  password: string;
+}
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  async login(@Body() dto: LoginDto) {
+    return await this.authService.login(dto.email, dto.password);
+  }
 
   @Post('magic-link')
   @HttpCode(HttpStatus.OK)
