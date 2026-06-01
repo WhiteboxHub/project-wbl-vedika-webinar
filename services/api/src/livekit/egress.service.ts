@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RoomCompositeEgressRequest, EncodedFileOutput, EgressClient } from 'livekit-server-sdk';
+import { RoomCompositeEgressRequest, EncodedFileOutput, EgressClient, EncodedFileType } from 'livekit-server-sdk';
 
 export interface StartEgressOptions {
   roomName: string;
@@ -43,10 +43,10 @@ export class EgressService {
 
     this.logger.log(`Starting egress for room ${options.roomName} -> ${options.outputPath}`);
 
-    const output: EncodedFileOutput = {
-      fileType: 'MP4',
+    const output = {
+      fileType: EncodedFileType.MP4,
       filepath: options.outputPath,
-    };
+    } as unknown as EncodedFileOutput;
 
     const egressRequest: RoomCompositeEgressRequest = {
       roomName: options.roomName,
@@ -55,7 +55,7 @@ export class EgressService {
         case: 'file',
         value: output,
       },
-    };
+    } as unknown as RoomCompositeEgressRequest;
 
     try {
       const egress = await this.egressClient.startRoomCompositeEgress(options.roomName, output);

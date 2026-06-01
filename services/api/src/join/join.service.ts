@@ -55,7 +55,7 @@ export class JoinService {
 
     // Generate LiveKit token for attendee
     const roomName = await this.getRoomNameForSession(sessionDetails.sessionId);
-    const livekitToken = this.tokenService.generateAttendeeToken(
+    const livekitToken = await this.tokenService.generateAttendeeToken(
       roomName,
       user.id,
       userName,
@@ -63,7 +63,7 @@ export class JoinService {
 
     return {
       livekitToken,
-      livekitUrl: process.env.LIVEKIT_URL,
+      livekitUrl: process.env.LIVEKIT_URL || '',
       roomName,
       sessionId: sessionDetails.sessionId,
       sessionTitle: sessionDetails.title,
@@ -74,7 +74,7 @@ export class JoinService {
 
   async issueInstructorToken(sessionId: string, instructorId: string, instructorName: string): Promise<string> {
     const roomName = await this.getRoomNameForSession(sessionId);
-    return this.tokenService.generateInstructorToken(roomName, instructorId, instructorName);
+    return await this.tokenService.generateInstructorToken(roomName, instructorId, instructorName);
   }
 
   private async getRoomNameForSession(sessionId: string): Promise<string> {

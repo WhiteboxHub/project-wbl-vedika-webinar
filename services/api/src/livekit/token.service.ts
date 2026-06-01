@@ -18,16 +18,16 @@ export class TokenService {
   private readonly livekitUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY');
-    this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET');
-    this.livekitUrl = this.configService.get<string>('LIVEKIT_URL');
+    this.apiKey = this.configService.get<string>('LIVEKIT_API_KEY') || '';
+    this.apiSecret = this.configService.get<string>('LIVEKIT_API_SECRET') || '';
+    this.livekitUrl = this.configService.get<string>('LIVEKIT_URL') || '';
 
     if (!this.apiKey || !this.apiSecret || !this.livekitUrl) {
       throw new Error('LiveKit credentials not configured');
     }
   }
 
-  generateToken(options: TokenOptions): string {
+  async generateToken(options: TokenOptions): Promise<string> {
     const at = new AccessToken(this.apiKey, this.apiSecret, {
       identity: options.identity,
       name: options.name,
@@ -42,11 +42,11 @@ export class TokenService {
       canPublishData: true,
     });
 
-    return at.toJwt();
+    return await at.toJwt();
   }
 
-  generateInstructorToken(roomName: string, identity: string, name: string): string {
-    return this.generateToken({
+  async generateInstructorToken(roomName: string, identity: string, name: string): Promise<string> {
+    return await this.generateToken({
       roomName,
       identity,
       name,
@@ -56,8 +56,8 @@ export class TokenService {
     });
   }
 
-  generateAttendeeToken(roomName: string, identity: string, name: string): string {
-    return this.generateToken({
+  async generateAttendeeToken(roomName: string, identity: string, name: string): Promise<string> {
+    return await this.generateToken({
       roomName,
       identity,
       name,

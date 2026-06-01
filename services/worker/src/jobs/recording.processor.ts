@@ -101,14 +101,12 @@ export async function processRecording(job: Job<RecordingJobData>): Promise<void
       'RecordingProcessor',
     );
 
-    const ffmpegCmd = buildFFmpegCommand({
+    const fullCommand = getFullCommand({
       inputPath: fullRawPath,
       outputPath: processingPath,
       resolution,
       ffmpegPath: workerConfig.ffmpeg.path,
     });
-
-    const fullCommand = getFullCommand(ffmpegCmd);
     logger.debug(`FFmpeg command: ${fullCommand}`, 'RecordingProcessor');
 
     await job.progress(40);
