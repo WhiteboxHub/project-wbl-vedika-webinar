@@ -66,9 +66,11 @@ export default function SessionDetail() {
     if (!id || !session) return;
     setActionLoading('host');
     try {
-      const token = await getHostToken(id);
-      navigate(`/class/${session.liveKitRoomName}`, {
-        state: { liveKitToken: token, livekitUrl: 'ws://localhost:7880', participantName: auth?.user?.name || 'Host', isHost: true, sessionId: id }
+      const { livekitToken, roomName } = await getHostToken(id);
+      // Route LiveKit signaling through Vite proxy → works both locally and via tunnel
+      const livekitUrl = `${window.location.origin.replace(/^http/, 'ws')}/livekit`;
+      navigate(`/class/${roomName}`, {
+        state: { liveKitToken: livekitToken, livekitUrl, participantName: auth?.user?.name || 'Host', isHost: true, sessionId: id }
       });
     } catch (err: any) { alert(err.message); }
     finally { setActionLoading(null); }
@@ -132,29 +134,52 @@ export default function SessionDetail() {
           </div>
         </div>
 
-        {/* Invite Link Card */}
+        {/* Invite Links */}
         {(isScheduled || isLive) && (
-          <div className="glass-panel fade-in" style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Video size={16} color="var(--primary-color)" /> Invite Link
-            </h3>
-            {!inviteLink ? (
-              <div className="flex-col flex-center" style={{ padding: '24px', textAlign: 'center' }}>
-                <p className="text-muted" style={{ marginBottom: '16px', fontSize: '14px' }}>Generate a shareable link for attendees to join</p>
-                <button className="btn btn-primary" onClick={handleGenerate} disabled={actionLoading === 'invite'}>
-                  Generate Invite Link
-                </button>
-              </div>
-            ) : (
+          <div className="flex-col gap-4" style={{ marginBottom: '16px' }}>
+            {/* Registration Link */}
+            <div className="glass-panel fade-in">
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={16} color="var(--primary-color)" /> Public Registration Link
+              </h3>
+              <p className="text-muted" style={{ marginBottom: '16px', fontSize: '13px' }}>Share this link publicly. Attendees will need to enter their name and email to get their personal join link.</p>
+              
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '13px', wordBreak: 'break-all', color: 'var(--text-muted)' }}>
-                  {inviteLink}
+                <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '13px', wordBreak: 'break-all', color: 'var(--text-main)' }}>
+                  {`${window.location.origin}/register/${id}`}
                 </div>
-                <button className="btn btn-secondary" onClick={handleCopy} style={{ whiteSpace: 'nowrap' }}>
+                <button className="btn btn-secondary" onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/register/${id}`);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }} style={{ whiteSpace: 'nowrap' }}>
                   {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy</>}
                 </button>
               </div>
-            )}
+            </div>
+
+            {/* Direct Link */}
+            <div className="glass-panel fade-in">
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Video size={16} color="var(--text-muted)" /> Direct Join Link (Bypass Registration)
+              </h3>
+              <p className="text-muted" style={{ marginBottom: '16px', fontSize: '13px' }}>Generate a direct link. Attendees will only be asked for their name.</p>
+              
+              {!inviteLink ? (
+                <button className="btn btn-secondary" onClick={handleGenerate} disabled={actionLoading === 'invite'}>
+                  Generate Direct Link
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '13px', wordBreak: 'break-all', color: 'var(--text-muted)' }}>
+                    {inviteLink}
+                  </div>
+                  <button className="btn btn-secondary" onClick={handleCopy} style={{ whiteSpace: 'nowrap' }}>
+                    <Copy size={15} /> Copy
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

@@ -8,6 +8,21 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    host: true,
+    allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      '/livekit': {
+        target: 'http://localhost:7880',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/livekit/, '')
+      }
+    }
   },
   envPrefix: ['VITE_', 'TAURI_'],
   resolve: {

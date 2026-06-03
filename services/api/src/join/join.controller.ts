@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Param } from '@nestjs/common';
 import { JoinService } from './join.service';
 import { JoinRequestDto } from './dto/join-request.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -23,13 +23,20 @@ export class JoinController {
   @Post('host-token')
   @UseGuards(JwtAuthGuard)
   async requestHostToken(@Body() dto: HostTokenDto, @CurrentUser() user: AuthUser) {
-    const token = await this.joinService.issueInstructorToken(dto.sessionId, user.id, user.name);
-    const roomName = `session_${dto.sessionId}`;
+    const { token, roomName } = await this.joinService.issueInstructorToken(dto.sessionId, user.id, user.name);
     return {
       livekitToken: token,
-      livekitUrl: process.env.LIVEKIT_URL || 'ws://localhost:7880',
+      livekitUrl: '', // Client uses Vite proxy
       roomName,
       sessionId: dto.sessionId,
     };
+  }
+
+  @Post('register/:sessionId')
+  async registerForSession(
+    @Param('sessionId') sessionId: string,
+    @Body() body: { name: string; email: string },
+  ) {
+    return await this.joinService.registerForSession(sessionId, body.name, body.email);
   }
 }

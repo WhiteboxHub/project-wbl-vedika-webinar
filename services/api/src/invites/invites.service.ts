@@ -8,8 +8,10 @@ import { CreateInviteResponse, ResolveInviteResponse, SessionStatus } from '@web
 
 interface InviteTokenPayload {
   sessionId: string;
-  type: 'invite';
+  type: 'invite' | 'registration';
   createdAt: number;
+  registeredName?: string;
+  registeredEmail?: string;
 }
 
 @Injectable()
@@ -58,6 +60,27 @@ export class InvitesService {
     };
   }
 
+  async createRegistrationToken(
+    sessionId: string,
+    name: string,
+    email: string,
+  ): Promise<string> {
+    const session = await this.sessionRepository.findOne({
+      where: { id: sessionId },
+    });
+    if (!session) throw new NotFoundException('Session not found');
+
+    const payload: InviteTokenPayload = {
+      sessionId,
+      type: 'registration',
+      createdAt: Date.now(),
+      registeredName: name,
+      registeredEmail: email,
+    };
+
+    return this.jwtService.sign(payload, { expiresIn: '7d' });
+  }
+
   async resolveInvite(token: string): Promise<ResolveInviteResponse> {
     let payload: InviteTokenPayload;
 
@@ -67,7 +90,7 @@ export class InvitesService {
       throw new UnauthorizedException('Invalid or expired invite token');
     }
 
-    if (payload.type !== 'invite') {
+    if (payload.type !== 'invite' && payload.type !== 'registration') {
       throw new UnauthorizedException('Invalid token type');
     }
 
@@ -92,6 +115,9 @@ export class InvitesService {
       status: session.status,
       instructorName: session.instructor.name,
       maxAttendees: session.maxAttendees,
+      registeredName: payload.registeredName,
+      registeredEmail: payload.registeredEmail,
     };
   }
 }
+

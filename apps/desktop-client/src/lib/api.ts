@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3000';
+const API_BASE = '/api';
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
@@ -149,6 +149,8 @@ export interface ResolveInviteResponse {
   status: string;
   instructorName: string;
   maxAttendees: number;
+  registeredName?: string;
+  registeredEmail?: string;
 }
 
 export interface JoinTokenResponse {
@@ -157,6 +159,19 @@ export interface JoinTokenResponse {
   roomName: string;
   sessionId: string;
   sessionTitle: string;
+}
+
+export async function registerForWebinar(sessionId: string, name: string, email: string): Promise<{ token: string; inviteUrl: string }> {
+  const res = await fetch(`${API_BASE}/join/register/${sessionId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Failed to register');
+  }
+  return res.json();
 }
 
 export async function resolveInvite(token: string): Promise<ResolveInviteResponse> {
@@ -187,7 +202,7 @@ export async function joinSession(token: string, name: string): Promise<JoinToke
 
 // ─── Host Controls ───────────────────────────────────────────────────────────
 
-export async function getHostToken(sessionId: string): Promise<string> {
+export async function getHostToken(sessionId: string): Promise<{ livekitToken: string; roomName: string }> {
   const res = await fetch(`${API_BASE}/join/host-token`, {
     method: 'POST',
     headers: authHeaders(),
@@ -195,7 +210,7 @@ export async function getHostToken(sessionId: string): Promise<string> {
   });
   if (!res.ok) throw new Error('Failed to get host token');
   const data = await res.json();
-  return data.livekitToken;
+  return { livekitToken: data.livekitToken, roomName: data.roomName };
 }
 
 export async function muteParticipant(sessionId: string, identity: string, trackSid: string): Promise<void> {

@@ -8,6 +8,7 @@ import SessionDetail from './pages/SessionDetail';
 import Join from './pages/Join';
 import WaitingRoom from './pages/WaitingRoom';
 import Classroom from './pages/Classroom';
+import Register from './pages/Register';
 import { getStoredAuth } from './lib/api';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -22,6 +23,7 @@ export default function App() {
       {/* Public */}
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/register/:id" element={<Register />} />
       <Route path="/join/:token" element={<Join />} />
       <Route path="/waiting/:token" element={<WaitingRoom />} />
       <Route path="/class/:roomId" element={<Classroom />} />

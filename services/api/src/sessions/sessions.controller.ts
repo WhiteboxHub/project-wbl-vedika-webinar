@@ -25,7 +25,6 @@ class MuteParticipantDto {
 }
 
 @Controller('classes')
-@UseGuards(JwtAuthGuard)
 export class SessionsController {
   constructor(
     private readonly sessionsService: SessionsService,
@@ -33,6 +32,7 @@ export class SessionsController {
   ) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   async createSession(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateSessionDto,
@@ -46,11 +46,13 @@ export class SessionsController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   async listSessions(@CurrentUser() user: AuthUser) {
     return await this.sessionsService.listInstructorSessions(user.id);
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
   async updateSession(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
@@ -60,6 +62,7 @@ export class SessionsController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
   async deleteSession(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
@@ -68,6 +71,7 @@ export class SessionsController {
   }
 
   @Post(':id/start')
+  @UseGuards(JwtAuthGuard)
   async startSession(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
@@ -76,6 +80,7 @@ export class SessionsController {
   }
 
   @Post(':id/end')
+  @UseGuards(JwtAuthGuard)
   async endSession(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,

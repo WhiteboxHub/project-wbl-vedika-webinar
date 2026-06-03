@@ -45,24 +45,39 @@ export default function WaitingRoom() {
     try {
       const data = await resolveInvite(token!);
       setSession(data);
-      if (data.status === 'live' && nameConfirmed) handleJoin();
+      if (data.registeredName) {
+        setName(data.registeredName);
+        setNameConfirmed(true);
+        if (data.status === 'live') {
+          // Wrap in timeout to ensure state settles before calling handleJoin
+          setTimeout(() => handleJoinRef(data.registeredName!), 0);
+        }
+      } else if (data.status === 'live' && nameConfirmed) {
+        handleJoin();
+      }
     } catch (err: any) {
       setError(err.message || 'Invalid invite link');
     }
   }
 
-  async function handleJoin() {
-    if (!token || !name.trim() || joining) return;
+  async function handleJoinRef(joinName: string) {
+    if (!token || !joinName.trim() || joining) return;
     setJoining(true);
     try {
-      const liveKitData = await joinSession(token, name);
+      const liveKitData = await joinSession(token, joinName);
+      // Route LiveKit through Vite proxy so it works locally AND via tunnel
+      const livekitUrl = `${window.location.origin.replace(/^http/, 'ws')}/livekit`;
       navigate(`/class/${liveKitData.roomName}`, {
-        state: { liveKitToken: liveKitData.livekitToken, livekitUrl: liveKitData.livekitUrl, participantName: name, isHost: false }
+        state: { liveKitToken: liveKitData.livekitToken, livekitUrl, participantName: joinName, isHost: false }
       });
     } catch (err: any) {
       setError(err.message || 'Failed to join');
       setJoining(false);
     }
+  }
+
+  async function handleJoin() {
+    return handleJoinRef(name);
   }
 
   function handleNameSubmit(e: React.FormEvent) {

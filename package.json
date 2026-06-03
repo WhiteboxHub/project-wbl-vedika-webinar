@@ -15,7 +15,8 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "tunnel": "npx cloudflared tunnel --url http://localhost:5173"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

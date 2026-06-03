@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from '../database/entities/user.entity';
 import { AttendanceEntity } from '../database/entities/attendance.entity';
+import { SessionEntity } from '../database/entities/session.entity';
 import { InvitesService } from '../invites/invites.service';
 import { TokenService } from '../livekit/token.service';
 import { UserRole } from '@webinar/shared';
@@ -24,28 +25,23 @@ export class JoinService {
     private readonly userRepository: Repository<UserEntity>,
     @InjectRepository(AttendanceEntity)
     private readonly attendanceRepository: Repository<AttendanceEntity>,
+    @InjectRepository(SessionEntity)
+    private readonly sessionRepository: Repository<SessionEntity>,
     private readonly invitesService: InvitesService,
     private readonly tokenService: TokenService,
   ) {}
 
   async requestJoin(inviteToken: string, userName: string): Promise<JoinTokenResponse> {
-    // Resolve invite to get session details
     const sessionDetails = await this.invitesService.resolveInvite(inviteToken);
 
-    // Find or create ephemeral user
     const email = `${userName.toLowerCase().replace(/\s+/g, '_')}@attendee.local`;
     let user = await this.userRepository.findOne({ where: { email } });
 
     if (!user) {
-      user = this.userRepository.create({
-        email,
-        name: userName,
-        role: UserRole.ATTENDEE,
-      });
+      user = this.userRepository.create({ email, name: userName, role: UserRole.ATTENDEE });
       await this.userRepository.save(user);
     }
 
-    // Record attendance
     const attendance = this.attendanceRepository.create({
       sessionId: sessionDetails.sessionId,
       userId: user.id,
@@ -53,17 +49,13 @@ export class JoinService {
     });
     await this.attendanceRepository.save(attendance);
 
-    // Generate LiveKit token for attendee
+    // Use REAL room name from database
     const roomName = await this.getRoomNameForSession(sessionDetails.sessionId);
-    const livekitToken = await this.tokenService.generateAttendeeToken(
-      roomName,
-      user.id,
-      userName,
-    );
+    const livekitToken = await this.tokenService.generateAttendeeToken(roomName, user.id, userName);
 
     return {
       livekitToken,
-      livekitUrl: process.env.LIVEKIT_URL || '',
+      livekitUrl: '', // Client constructs URL via Vite proxy
       roomName,
       sessionId: sessionDetails.sessionId,
       sessionTitle: sessionDetails.title,
@@ -72,14 +64,39 @@ export class JoinService {
     };
   }
 
-  async issueInstructorToken(sessionId: string, instructorId: string, instructorName: string): Promise<string> {
+  async issueInstructorToken(
+    sessionId: string,
+    instructorId: string,
+    instructorName: string,
+  ): Promise<{ token: string; roomName: string }> {
     const roomName = await this.getRoomNameForSession(sessionId);
-    return await this.tokenService.generateInstructorToken(roomName, instructorId, instructorName);
+    const token = await this.tokenService.generateInstructorToken(roomName, instructorId, instructorName);
+    return { token, roomName };
+  }
+
+  async registerForSession(sessionId: string, name: string, email: string): Promise<{ token: string; inviteUrl: string }> {
+    const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException('Session not found');
+
+    let user = await this.userRepository.findOne({ where: { email } });
+    if (!user) {
+      user = this.userRepository.create({ email, name, role: UserRole.ATTENDEE });
+      await this.userRepository.save(user);
+    }
+
+    let attendance = await this.attendanceRepository.findOne({ where: { sessionId, userId: user.id } });
+    if (!attendance) {
+      attendance = this.attendanceRepository.create({ sessionId, userId: user.id });
+      await this.attendanceRepository.save(attendance);
+    }
+
+    const token = await this.invitesService.createRegistrationToken(sessionId, name, email);
+    return { token, inviteUrl: `webinar://join?token=${token}` };
   }
 
   private async getRoomNameForSession(sessionId: string): Promise<string> {
-    // In a real implementation, fetch this from session entity
-    // For now, return a generated room name
-    return `session_${sessionId}`;
+    const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
+    if (!session) throw new NotFoundException(`Session ${sessionId} not found`);
+    return session.liveKitRoomName;
   }
 }

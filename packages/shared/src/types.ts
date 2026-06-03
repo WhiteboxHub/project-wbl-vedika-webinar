@@ -130,6 +130,8 @@ export interface ResolveInviteResponse {
   status: SessionStatus;
   instructorName: string;
   maxAttendees: number;
+  registeredName?: string;
+  registeredEmail?: string;
 }
 
 // Recording types
