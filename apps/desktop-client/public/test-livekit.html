@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LiveKit Connection Test</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; padding: 20px; }
+    .log { margin: 4px 0; padding: 4px 8px; border-left: 3px solid #444; }
+    .ok { border-left-color: #4ade80; color: #4ade80; }
+    .err { border-left-color: #ef4444; color: #ef4444; }
+    .warn { border-left-color: #eab308; color: #eab308; }
+    button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>🔧 LiveKit Connection Test</h1>
+  <div id="controls">
+    <button onclick="testStep1()">Step 1: Test API Login</button>
+    <button onclick="testStep2()">Step 2: Get Host Token</button>
+    <button onclick="testStep3()">Step 3: Connect to LiveKit</button>
+    <button onclick="testStep4()">Step 4: Test WebSocket Direct</button>
+  </div>
+  <div id="log"></div>
+
+  <script type="module">
+    import { Room, RoomEvent } from '/node_modules/livekit-client/dist/livekit-client.esm.mjs';
+
+    const logEl = document.getElementById('log');
+    function log(msg, type = '') {
+      const div = document.createElement('div');
+      div.className = 'log ' + type;
+      div.textContent = new Date().toLocaleTimeString() + ' | ' + msg;
+      logEl.appendChild(div);
+      console.log(msg);
+    }
+
+    let authToken = null;
+    let livekitToken = null;
+    let roomName = null;
+
+    window.testStep1 = async function() {
+      log('--- Step 1: Testing API Login ---');
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'manisaisaduvala@gmail.com', password: 'webinar123' }),
+        });
+        const data = await res.json();
+        if (data.accessToken) {
+          authToken = data.accessToken;
+          log('✅ Login OK. User: ' + data.user.name + ', Role: ' + data.user.role, 'ok');
+        } else {
+          log('❌ Login failed: ' + JSON.stringify(data), 'err');
+        }
+      } catch (e) {
+        log('❌ Login error: ' + e.message, 'err');
+      }
+    };
+
+    window.testStep2 = async function() {
+      if (!authToken) { log('⚠️ Login first!', 'warn'); return; }
+      log('--- Step 2: Getting Host Token ---');
+      try {
+        const res = await fetch('/api/join/host-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+          body: JSON.stringify({ sessionId: 'df5402c0-b68d-4bbb-8c88-d15b13d3cb1a' }),
+        });
+        const data = await res.json();
+        log('Response: ' + JSON.stringify(data));
+        if (data.livekitToken) {
+          livekitToken = data.livekitToken;
+          roomName = data.roomName;
+          log('✅ Got LiveKit token (length: ' + livekitToken.length + '), room: ' + roomName, 'ok');
+        } else {
+          log('❌ No livekitToken in response: ' + JSON.stringify(data), 'err');
+        }
+      } catch (e) {
+        log('❌ Host token error: ' + e.message, 'err');
+      }
+    };
+
+    window.testStep3 = async function() {
+      if (!livekitToken) { log('⚠️ Get host token first!', 'warn'); return; }
+      log('--- Step 3: Connecting to LiveKit ---');
+      const serverUrl = 'ws://localhost:7880';
+      log('Server URL: ' + serverUrl);
+      log('Token (first 50 chars): ' + livekitToken.substring(0, 50) + '...');
+      log('Room: ' + roomName);
+
+      try {
+        const room = new Room();
+
+        room.on(RoomEvent.Connected, () => {
+          log('✅ CONNECTED to room: ' + room.name + ', participants: ' + room.numParticipants, 'ok');
+        });
+
+        room.on(RoomEvent.Disconnected, (reason) => {
+          log('⚠️ Disconnected: ' + reason, 'warn');
+        });
+
+        room.on(RoomEvent.SignalConnected, () => {
+          log('✅ Signal connected (WebSocket OK)', 'ok');
+        });
+
+        room.on(RoomEvent.MediaDevicesError, (e) => {
+          log('⚠️ Media devices error: ' + e.message, 'warn');
+        });
+
+        room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+          log('Connection quality: ' + quality + ' for ' + participant.identity);
+        });
+
+        log('Calling room.connect()...');
+        await room.connect(serverUrl, livekitToken);
+        log('✅ room.connect() resolved! Room state: ' + room.state, 'ok');
+        log('Room name: ' + room.name, 'ok');
+        log('Local participant: ' + room.localParticipant.identity, 'ok');
+      } catch (e) {
+        log('❌ Connection FAILED: ' + e.message, 'err');
+        log('Error details: ' + JSON.stringify({name: e.name, stack: e.stack?.split('\n')[0]}), 'err');
+      }
+    };
+
+    window.testStep4 = async function() {
+      log('--- Step 4: Testing WebSocket Direct ---');
+      try {
+        const ws = new WebSocket('ws://localhost:7880');
+        ws.onopen = () => { log('✅ WebSocket opened to ws://localhost:7880', 'ok'); ws.close(); };
+        ws.onerror = (e) => { log('❌ WebSocket error to ws://localhost:7880', 'err'); };
+        ws.onclose = (e) => { log('WebSocket closed: code=' + e.code + ' reason=' + e.reason); };
+      } catch (e) {
+        log('❌ WebSocket creation failed: ' + e.message, 'err');
+      }
+    };
+  </script>
+</body>
+</html>

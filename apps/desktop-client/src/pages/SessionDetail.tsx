@@ -67,8 +67,8 @@ export default function SessionDetail() {
     setActionLoading('host');
     try {
       const { livekitToken, roomName } = await getHostToken(id);
-      // Route LiveKit signaling through Vite proxy → works both locally and via tunnel
-      const livekitUrl = `${window.location.origin.replace(/^http/, 'ws')}/livekit`;
+      // Connect directly to LiveKit server
+      const livekitUrl = 'ws://localhost:7880';
       navigate(`/class/${roomName}`, {
         state: { liveKitToken: livekitToken, livekitUrl, participantName: auth?.user?.name || 'Host', isHost: true, sessionId: id }
       });

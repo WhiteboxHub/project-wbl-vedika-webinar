@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   LiveKitRoom,
@@ -89,10 +89,13 @@ function ParticipantList({ isHost, sessionId }: { isHost: boolean; sessionId: st
 
 // ─── Custom Stage with Raise Hand ─────────────────────────────────────────────
 function Stage({ isHost, onEndMeeting }: { isHost: boolean; onEndMeeting: () => void }) {
-  const tracks = useTracks([
-    { source: Track.Source.Camera, withPlaceholder: true },
-    { source: Track.Source.ScreenShare, withPlaceholder: false },
-  ]);
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.ScreenShare, withPlaceholder: false },
+    ],
+    { onlySubscribed: false }
+  );
 
   const { localParticipant } = useLocalParticipant();
   const [handRaised, setHandRaised] = useState(false);
@@ -121,9 +124,15 @@ function Stage({ isHost, onEndMeeting }: { isHost: boolean; onEndMeeting: () => 
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#000', position: 'relative' }}>
-      <GridLayout tracks={tracks} style={{ flex: 1, padding: '16px' }}>
-        <ParticipantTile />
-      </GridLayout>
+      {tracks.length === 0 ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+          <h3>Waiting for participants to turn on their cameras...</h3>
+        </div>
+      ) : (
+        <GridLayout tracks={tracks} style={{ flex: 1, padding: '16px' }}>
+          <ParticipantTile />
+        </GridLayout>
+      )}
       
       {/* Custom Control Bar Area */}
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '16px', background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)', position: 'absolute', bottom: 0, left: 0, right: 0 }}>
@@ -181,15 +190,30 @@ export default function Classroom() {
 
   const [token, setToken] = useState<string | null>(null);
   const serverUrl = state?.livekitUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
+
+  // Connect options: use public STUN servers for ICE candidate discovery.
+  // Don't force 'relay' mode — let the browser try direct/STUN first.
+  const connectOptions = {
+    rtcConfig: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+    },
+  };
   const isHost = state?.isHost || false;
   const sessionId = state?.sessionId || '';
 
   const [activeTab, setActiveTab] = useState<'chat'|'participants'>('chat');
+  const [connectionStatus, setConnectionStatus] = useState<string>('Connecting...');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
     const stateToken = state?.liveKitToken;
     if (!stateToken) { navigate('/'); return; }
     setToken(stateToken);
+    console.log('[Classroom] serverUrl:', serverUrl);
+    console.log('[Classroom] token length:', stateToken?.length);
   }, [location, navigate]);
 
   if (!token) {
@@ -202,15 +226,30 @@ export default function Classroom() {
   }
 
   return (
-    <div style={{ width: '100%', height: '100vh', display: 'flex', background: 'var(--bg-main)' }}>
+    <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)' }}>
+      {/* Connection status banner */}
+      {(connectionError || connectionStatus === 'Connecting...') && (
+        <div style={{
+          padding: '8px 16px',
+          background: connectionError ? 'rgba(239,68,68,0.15)' : 'rgba(234,179,8,0.15)',
+          color: connectionError ? '#ef4444' : '#eab308',
+          fontSize: '13px', fontWeight: 600, textAlign: 'center',
+          borderBottom: `1px solid ${connectionError ? 'rgba(239,68,68,0.3)' : 'rgba(234,179,8,0.3)'}`
+        }}>
+          {connectionError ? `❌ Connection Error: ${connectionError}` : `⏳ ${connectionStatus} (Server: ${serverUrl})`}
+        </div>
+      )}
       <LiveKitRoom
-        video={false}
-        audio={false}
+        video={true}
+        audio={true}
         token={token}
         serverUrl={serverUrl}
+        connectOptions={connectOptions}
         data-lk-theme="default"
-        style={{ width: '100%', height: '100%', display: 'flex' }}
+        style={{ flex: 1, display: 'flex' }}
         onDisconnected={() => navigate(isHost ? '/dashboard' : '/')}
+        onConnected={() => { setConnectionStatus('Connected!'); setConnectionError(null); console.log('[Classroom] Connected to LiveKit!'); }}
+        onError={(err) => { setConnectionError(err.message); console.error('[Classroom] LiveKit error:', err); }}
       >
         <div style={{ display: 'flex', width: '100%', height: '100%' }}>
           

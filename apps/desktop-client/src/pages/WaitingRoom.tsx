@@ -65,8 +65,8 @@ export default function WaitingRoom() {
     setJoining(true);
     try {
       const liveKitData = await joinSession(token, joinName);
-      // Route LiveKit through Vite proxy so it works locally AND via tunnel
-      const livekitUrl = `${window.location.origin.replace(/^http/, 'ws')}/livekit`;
+      // Connect directly to LiveKit server
+      const livekitUrl = 'ws://localhost:7880';
       navigate(`/class/${liveKitData.roomName}`, {
         state: { liveKitToken: liveKitData.livekitToken, livekitUrl, participantName: joinName, isHost: false }
       });
