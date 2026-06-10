@@ -13,8 +13,9 @@ import {
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import '@livekit/components-styles';
-import { Loader2, MicOff, UserX, Square, Users, MessageSquare, Hand, ShieldCheck, Play } from 'lucide-react';
+import { Loader2, MicOff, UserX, Square, Users, MessageSquare, Hand } from 'lucide-react';
 import { removeParticipant, muteParticipant } from '../lib/api';
+import { loadClassroomSession, clearClassroomSession } from '../lib/classroom-session';
 
 // ─── Interactive Participant List ──────────────────────────────────────────────
 function ParticipantList({ isHost, sessionId }: { isHost: boolean; sessionId: string }) {
@@ -180,39 +181,25 @@ export default function Classroom() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const state = location.state as {
-    liveKitToken?: string;
-    livekitUrl?: string;
-    participantName?: string;
-    isHost?: boolean;
-    sessionId?: string;
-  } | null;
+  // Resolve session data from router state OR sessionStorage (for direct URL / refresh)
+  const resolvedState = (location.state as any) || (roomId ? loadClassroomSession(roomId) : null);
 
   const [token, setToken] = useState<string | null>(null);
-  const serverUrl = state?.livekitUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
-
-  // Connect options: use public STUN servers for ICE candidate discovery.
-  // Don't force 'relay' mode — let the browser try direct/STUN first.
-  const connectOptions = {
-    rtcConfig: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-      ],
-    },
-  };
-  const isHost = state?.isHost || false;
-  const sessionId = state?.sessionId || '';
+  const [livekitUrl, setLivekitUrl] = useState<string>('');
+  const isHost = resolvedState?.isHost || false;
+  const sessionId = resolvedState?.sessionId || '';
 
   const [activeTab, setActiveTab] = useState<'chat'|'participants'>('chat');
   const [connectionStatus, setConnectionStatus] = useState<string>('Connecting...');
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
   useEffect(() => {
-    const stateToken = state?.liveKitToken;
+    const stateToken = resolvedState?.liveKitToken;
+    const stateUrl = resolvedState?.livekitUrl;
     if (!stateToken) { navigate('/'); return; }
     setToken(stateToken);
-    console.log('[Classroom] serverUrl:', serverUrl);
+    setLivekitUrl(stateUrl || '');
+    console.log('[Classroom] serverUrl:', stateUrl);
     console.log('[Classroom] token length:', stateToken?.length);
   }, [location, navigate]);
 
@@ -236,18 +223,20 @@ export default function Classroom() {
           fontSize: '13px', fontWeight: 600, textAlign: 'center',
           borderBottom: `1px solid ${connectionError ? 'rgba(239,68,68,0.3)' : 'rgba(234,179,8,0.3)'}`
         }}>
-          {connectionError ? `❌ Connection Error: ${connectionError}` : `⏳ ${connectionStatus} (Server: ${serverUrl})`}
+          {connectionError ? `❌ Connection Error: ${connectionError}` : `⏳ ${connectionStatus} (Server: ${livekitUrl})`}
         </div>
       )}
       <LiveKitRoom
         video={true}
         audio={true}
         token={token}
-        serverUrl={serverUrl}
-        connectOptions={connectOptions}
+        serverUrl={livekitUrl}
         data-lk-theme="default"
         style={{ flex: 1, display: 'flex' }}
-        onDisconnected={() => navigate(isHost ? '/dashboard' : '/')}
+        onDisconnected={() => {
+          if (roomId) clearClassroomSession(roomId);
+          navigate(isHost ? '/dashboard' : '/');
+        }}
         onConnected={() => { setConnectionStatus('Connected!'); setConnectionError(null); console.log('[Classroom] Connected to LiveKit!'); }}
         onError={(err) => { setConnectionError(err.message); console.error('[Classroom] LiveKit error:', err); }}
       >

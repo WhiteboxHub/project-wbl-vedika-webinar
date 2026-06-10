@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { resolveInvite, joinSession, ResolveInviteResponse } from '../lib/api';
+import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
 import { Loader2, Radio, Clock, Users, LogIn } from 'lucide-react';
 
 export default function WaitingRoom() {
@@ -65,11 +66,10 @@ export default function WaitingRoom() {
     setJoining(true);
     try {
       const liveKitData = await joinSession(token, joinName);
-      // Connect directly to LiveKit server
-      const livekitUrl = 'ws://localhost:7880';
-      navigate(`/class/${liveKitData.roomName}`, {
-        state: { liveKitToken: liveKitData.livekitToken, livekitUrl, participantName: joinName, isHost: false }
-      });
+      const livekitUrl = getLiveKitUrl();
+      const sessionData = { liveKitToken: liveKitData.livekitToken, livekitUrl, participantName: joinName, isHost: false, sessionId: liveKitData.sessionId || '' };
+      saveClassroomSession(liveKitData.roomName, sessionData);
+      navigate(`/class/${liveKitData.roomName}`, { state: sessionData });
     } catch (err: any) {
       setError(err.message || 'Failed to join');
       setJoining(false);

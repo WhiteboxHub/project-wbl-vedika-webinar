@@ -1,22 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { resolveInvite, registerForWebinar, ResolveInviteResponse } from '../lib/api';
-import { Loader2, Calendar, Clock, Video, CheckCircle, Copy } from 'lucide-react';
+import { registerForWebinar } from '../lib/api';
+import { Loader2, Calendar, Clock, Video, CheckCircle } from 'lucide-react';
 
 export default function Register() {
   const { id: sessionId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
-  const [session, setSession] = useState<ResolveInviteResponse | null>(null);
+  const [session, setSession] = useState<{title?: string; description?: string; scheduledAt?: string; status?: string; instructorName?: string} | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  
-  const [successLink, setSuccessLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -57,24 +54,19 @@ export default function Register() {
     try {
       const { inviteUrl } = await registerForWebinar(sessionId!, name, email);
       
-      // Convert webinar://join?token=XYZ to http://domain/join/XYZ
+      // Extract the token from webinar://join?token=XYZ and redirect directly
       const url = new URL(inviteUrl);
       const token = url.searchParams.get('token');
-      const publicLink = `${window.location.origin}/join/${token}`;
-      
-      setSuccessLink(publicLink);
+      if (token) {
+        // Navigate directly into the waiting room — no copy-paste needed!
+        navigate(`/waiting/${token}`);
+      } else {
+        throw new Error('Invalid registration response');
+      }
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleCopy = () => {
-    if (successLink) {
-      navigator.clipboard.writeText(successLink);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -99,36 +91,6 @@ export default function Register() {
     );
   }
 
-  if (successLink) {
-    return (
-      <div className="flex-col flex-center" style={{ height: '100vh', padding: '20px' }}>
-        <div className="bg-orb" style={{ top: '-100px', left: '-100px', width: '400px', height: '400px' }} />
-        <div className="glass-panel fade-in text-center" style={{ maxWidth: '480px', width: '100%', position: 'relative', zIndex: 1 }}>
-          <div style={{ width: '64px', height: '64px', background: 'rgba(16,185,129,0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
-            <CheckCircle size={32} color="var(--success-color)" />
-          </div>
-          <h2 style={{ fontSize: '28px', marginBottom: '8px' }}>You're Registered!</h2>
-          <p className="text-muted">Save your personal join link below. You'll need this to enter the webinar.</p>
-          
-          <div style={{ marginTop: '32px', padding: '16px', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <input 
-              readOnly 
-              value={successLink} 
-              style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', fontSize: '13px', outline: 'none' }}
-            />
-            <button onClick={handleCopy} className="btn btn-secondary" style={{ padding: '8px 12px' }}>
-              {copied ? <CheckCircle size={16} color="var(--success-color)" /> : <Copy size={16} />}
-              {copied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
-
-          <button className="btn btn-primary mt-8" onClick={() => window.location.href = successLink} style={{ width: '100%' }}>
-            Enter Webinar Now
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex-col flex-center" style={{ minHeight: '100vh', padding: '40px 20px' }}>
