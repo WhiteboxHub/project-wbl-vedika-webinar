@@ -1,11 +1,3 @@
-/**
- * Persists LiveKit connection data in sessionStorage so that:
- * 1. Direct URL access (via tunnel) works without losing state
- * 2. Page refreshes inside the classroom don't boot you out
- *
- * Data is keyed by roomId and cleared when you disconnect.
- */
-
 export interface ClassroomSessionData {
   liveKitToken: string;
   livekitUrl: string;
@@ -38,17 +30,26 @@ export function clearClassroomSession(roomId: string) {
 }
 
 /**
- * Returns the LiveKit WebSocket URL that works whether you're running
- * locally or through a Cloudflare tunnel.
+ * Returns the correct LiveKit WebSocket URL.
  *
- * - Locally: the Vite proxy forwards /livekit → ws://localhost:7880
- * - Via tunnel: the tunnel forwards /livekit → ws://localhost:7880 on the server
- *
- * We use the current page's origin so the URL is always correct.
+ * Priority:
+ *  1. VITE_LIVEKIT_URL env var (set this to LiveKit Cloud URL for production-like behaviour)
+ *  2. ws://localhost:7880 when running locally (direct — no proxy hop needed)
+ *  3. Proxy path through the tunnel (/livekit) for remote attendees
  */
 export function getLiveKitUrl(): string {
-  const origin = window.location.origin;
-  // Convert https:// → wss:// and http:// → ws://
+  // Explicit override — e.g. LiveKit Cloud: wss://xxx.livekit.cloud
+  const envUrl = (import.meta as any).env?.VITE_LIVEKIT_URL;
+  if (envUrl) return envUrl;
+
+  const { hostname, origin } = window.location;
+
+  // On localhost/127.0.0.1 connect directly — fastest, most reliable
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'ws://localhost:7880';
+  }
+
+  // Remote access via Cloudflare tunnel — proxy WebSocket through Vite
   const wsOrigin = origin.replace(/^https/, 'wss').replace(/^http/, 'ws');
   return `${wsOrigin}/livekit`;
 }
