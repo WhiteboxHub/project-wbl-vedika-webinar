@@ -10,6 +10,7 @@ import WaitingRoom from './pages/WaitingRoom';
 import Classroom from './pages/Classroom';
 import Register from './pages/Register';
 import TestLiveKit from './pages/TestLiveKit';
+import WebinarRoom from './pages/WebinarRoom';
 import { getStoredAuth } from './lib/api';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -28,6 +29,7 @@ export default function App() {
       <Route path="/join/:token" element={<Join />} />
       <Route path="/waiting/:token" element={<WaitingRoom />} />
       <Route path="/class/:roomId" element={<Classroom />} />
+      <Route path="/webinar/:roomId" element={<WebinarRoom />} />
       <Route path="/test-lk" element={<TestLiveKit />} />
 
       {/* Organizer Dashboard (protected) */}

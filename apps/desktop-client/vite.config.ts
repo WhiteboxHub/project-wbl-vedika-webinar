@@ -16,6 +16,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
+      '/signal': {
+        target: 'http://localhost:3000',
+        ws: true,
+        changeOrigin: true,
+      },
       '/livekit': {
         target: 'http://localhost:7880',
         ws: true,

@@ -24,6 +24,7 @@
     "@nestjs/platform-express": "^10.3.8",
     "@nestjs/swagger": "^7.3.1",
     "@nestjs/typeorm": "^10.0.2",
+    "@types/ws": "^8.18.1",
     "@webinar/shared": "workspace:*",
     "bull": "^4.12.9",
     "class-transformer": "^0.5.1",
@@ -37,7 +38,8 @@
     "redis": "^4.6.13",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.20"
+    "typeorm": "^0.3.20",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.2",

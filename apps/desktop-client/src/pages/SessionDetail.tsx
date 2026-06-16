@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getSession, generateInviteLink, startSession, endSession, getHostToken, getStoredAuth, Session } from '../lib/api';
-import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
+import { getSession, generateInviteLink, startSession, endSession, getStoredAuth, Session } from '../lib/api';
+import { saveWebinarSession } from '../lib/classroom-session';
 import { ArrowLeft, Copy, Check, Play, Square, Users, Clock, Radio, Video, LogIn, Globe, AlertTriangle } from 'lucide-react';
 
 // Persist tunnel URL across sessions
@@ -103,11 +103,16 @@ export default function SessionDetail() {
     if (!id || !session) return;
     setActionLoading('host');
     try {
-      const { livekitToken, roomName } = await getHostToken(id);
-      const livekitUrl = getLiveKitUrl();
-      const sessionData = { liveKitToken: livekitToken, livekitUrl, participantName: auth?.user?.name || 'Host', isHost: true, sessionId: id };
-      saveClassroomSession(roomName, sessionData);
-      navigate(`/class/${roomName}`, { state: sessionData });
+      const roomName = session.liveKitRoomName;
+      const webinarData = {
+        roomId: roomName,
+        userId: auth?.user?.id || 'host',
+        userName: auth?.user?.name || 'Host',
+        isHost: true,
+        sessionId: id,
+      };
+      saveWebinarSession(roomName, webinarData);
+      navigate(`/webinar/${roomName}`, { state: webinarData });
     } catch (err: any) { alert(err.message); }
     finally { setActionLoading(null); }
   }
@@ -290,7 +295,7 @@ export default function SessionDetail() {
           <div className="flex-col" style={{ gap: '10px' }}>
             {[
               { label: 'Session ID', value: session.id },
-              { label: 'LiveKit Room', value: session.liveKitRoomName },
+              { label: 'Room Name', value: session.liveKitRoomName },
               { label: 'Status', value: session.status },
             ].map(row => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-color)' }}>
