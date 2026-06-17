@@ -1,6 +1,6 @@
 export interface ClassroomSessionData {
   liveKitToken: string;
-  livekitUrl: string;
+  livekitUrl?: string;
   participantName: string;
   isHost: boolean;
   sessionId: string;

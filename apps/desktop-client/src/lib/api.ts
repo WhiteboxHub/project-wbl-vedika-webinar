@@ -52,6 +52,20 @@ function authHeaders(): Record<string, string> {
   };
 }
 
+/**
+ * Central fetch wrapper. If the server returns 401 (expired/invalid JWT),
+ * it clears stored auth and redirects to /login so the user re-authenticates.
+ */
+async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    clearAuth();
+    window.location.href = '/login';
+    throw new Error('Session expired. Please log in again.');
+  }
+  return res;
+}
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 export interface Session {
@@ -76,19 +90,19 @@ export interface CreateSessionPayload {
 }
 
 export async function getSessions(): Promise<Session[]> {
-  const res = await fetch(`${API_BASE}/classes`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/classes`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to load sessions');
   return res.json();
 }
 
 export async function getSession(id: string): Promise<Session> {
-  const res = await fetch(`${API_BASE}/classes/${id}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/classes/${id}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to load session');
   return res.json();
 }
 
 export async function createSession(payload: CreateSessionPayload): Promise<Session> {
-  const res = await fetch(`${API_BASE}/classes`, {
+  const res = await apiFetch(`${API_BASE}/classes`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(payload),
@@ -101,7 +115,7 @@ export async function createSession(payload: CreateSessionPayload): Promise<Sess
 }
 
 export async function startSession(id: string): Promise<Session> {
-  const res = await fetch(`${API_BASE}/classes/${id}/start`, {
+  const res = await apiFetch(`${API_BASE}/classes/${id}/start`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -113,7 +127,7 @@ export async function startSession(id: string): Promise<Session> {
 }
 
 export async function endSession(id: string): Promise<Session> {
-  const res = await fetch(`${API_BASE}/classes/${id}/end`, {
+  const res = await apiFetch(`${API_BASE}/classes/${id}/end`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -125,7 +139,7 @@ export async function endSession(id: string): Promise<Session> {
 }
 
 export async function generateInviteLink(sessionId: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/classes/${sessionId}/invites`, {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/invites`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ expiresInHours: 24 }),
@@ -203,12 +217,15 @@ export async function joinSession(token: string, name: string): Promise<JoinToke
 // ─── Host Controls ───────────────────────────────────────────────────────────
 
 export async function getHostToken(sessionId: string): Promise<{ livekitToken: string; roomName: string }> {
-  const res = await fetch(`${API_BASE}/join/host-token`, {
+  const res = await apiFetch(`${API_BASE}/join/host-token`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ sessionId }),
   });
-  if (!res.ok) throw new Error('Failed to get host token');
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || `Server error: ${res.status}`);
+  }
   const data = await res.json();
   return { livekitToken: data.livekitToken, roomName: data.roomName };
 }

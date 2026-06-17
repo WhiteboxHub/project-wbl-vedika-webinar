@@ -19,7 +19,7 @@ import {
   MessageSquare, Hand, Wifi, WifiOff, AlertCircle,
 } from 'lucide-react';
 import { removeParticipant, muteParticipant } from '../lib/api';
-import { loadClassroomSession, clearClassroomSession } from '../lib/classroom-session';
+import { loadClassroomSession, clearClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
 
 // ─── Participant List ──────────────────────────────────────────────────────────
 function ParticipantList({ isHost, sessionId }: { isHost: boolean; sessionId: string }) {
@@ -231,7 +231,7 @@ export default function Classroom() {
   );
 
   const liveKitToken: string = sessionData?.liveKitToken || '';
-  const livekitUrl: string   = sessionData?.livekitUrl   || 'ws://localhost:7880';
+  const livekitUrl: string   = sessionData?.livekitUrl || getLiveKitUrl();
   const isHost: boolean      = sessionData?.isHost       || false;
   const sessionId: string    = sessionData?.sessionId    || '';
 

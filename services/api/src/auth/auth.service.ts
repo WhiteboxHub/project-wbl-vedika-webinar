@@ -136,7 +136,7 @@ export class AuthService {
     };
 
     return this.jwtService.sign(payload, {
-      expiresIn: '1h',
+      expiresIn: '24h',
     });
   }
 

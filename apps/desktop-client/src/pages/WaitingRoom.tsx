@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { resolveInvite, joinSession, ResolveInviteResponse } from '../lib/api';
-import { saveWebinarSession } from '../lib/classroom-session';
+import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
 import { Loader2, Radio, Clock, Users, LogIn } from 'lucide-react';
 
 export default function WaitingRoom() {
@@ -26,35 +26,17 @@ export default function WaitingRoom() {
     loadSession();
   }, [token]);
 
-  // Poll every 5s for status change
-  useEffect(() => {
-    if (!token || !nameConfirmed) return;
-    const interval = setInterval(async () => {
-      try {
-        const data = await resolveInvite(token);
-        setSession(data);
-        if (data.status === 'live') {
-          clearInterval(interval);
-          handleJoin();
-        }
-      } catch {}
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [token, nameConfirmed, name]);
+  // (polling removed — attendees join immediately via LiveKit room; they wait in-room for the host to publish)
 
   async function loadSession() {
     try {
       const data = await resolveInvite(token!);
       setSession(data);
       if (data.registeredName) {
+        // Pre-registered attendee: set name and auto-join immediately
         setName(data.registeredName);
         setNameConfirmed(true);
-        if (data.status === 'live') {
-          // Wrap in timeout to ensure state settles before calling handleJoin
-          setTimeout(() => handleJoinRef(data.registeredName!), 0);
-        }
-      } else if (data.status === 'live' && nameConfirmed) {
-        handleJoin();
+        setTimeout(() => handleJoinRef(data.registeredName!), 0);
       }
     } catch (err: any) {
       setError(err.message || 'Invalid invite link');
@@ -67,15 +49,15 @@ export default function WaitingRoom() {
     try {
       const liveKitData = await joinSession(token, joinName);
       const roomName = liveKitData.roomName;
-      const webinarData = {
-        roomId: roomName,
-        userId: `attendee_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        userName: joinName,
+      const classroomData = {
+        participantName: joinName,
         isHost: false,
         sessionId: liveKitData.sessionId || '',
+        liveKitToken: liveKitData.livekitToken,
+        livekitUrl: getLiveKitUrl(), // always derive dynamically — backend returns ''
       };
-      saveWebinarSession(roomName, webinarData);
-      navigate(`/webinar/${roomName}`, { state: webinarData });
+      saveClassroomSession(roomName, classroomData);
+      navigate(`/class/${roomName}`, { state: classroomData });
     } catch (err: any) {
       setError(err.message || 'Failed to join');
       setJoining(false);
@@ -90,7 +72,9 @@ export default function WaitingRoom() {
     e.preventDefault();
     if (!name.trim()) return;
     setNameConfirmed(true);
-    if (session?.status === 'live') handleJoin();
+    // Allow joining regardless of status — backend handles SCHEDULED rooms fine
+    // (LiveKit auto-creates rooms on first join; attendee waits for host to publish)
+    handleJoinRef(name);
   }
 
   if (error) {

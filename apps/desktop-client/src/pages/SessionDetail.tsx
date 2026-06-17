@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getSession, generateInviteLink, startSession, endSession, getStoredAuth, Session } from '../lib/api';
-import { saveWebinarSession } from '../lib/classroom-session';
-import { ArrowLeft, Copy, Check, Play, Square, Users, Clock, Radio, Video, LogIn, Globe, AlertTriangle } from 'lucide-react';
+import { getSession, generateInviteLink, startSession, endSession, getStoredAuth, Session, getHostToken } from '../lib/api';
+import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
+import { ArrowLeft, Copy, Check, Square, Users, Clock, Radio, Video, Globe, AlertTriangle, Loader2 } from 'lucide-react';
 
 // Persist tunnel URL across sessions
 const TUNNEL_KEY = 'webinar_tunnel_url';
@@ -83,14 +83,6 @@ export default function SessionDetail() {
     finally { setActionLoading(null); }
   }
 
-  async function handleStart() {
-    if (!id) return;
-    setActionLoading('start');
-    try { await startSession(id); await load(id); }
-    catch (err: any) { alert(err.message); }
-    finally { setActionLoading(null); }
-  }
-
   async function handleEnd() {
     if (!id || !confirm('End this session for all participants?')) return;
     setActionLoading('end');
@@ -99,22 +91,35 @@ export default function SessionDetail() {
     finally { setActionLoading(null); }
   }
 
-  async function handleJoinAsHost() {
+  /**
+   * Atomically starts the session (if not already live) and joins as host.
+   * This prevents the two-step "Start then Join" confusion.
+   */
+  async function handleStartAndJoin() {
     if (!id || !session) return;
     setActionLoading('host');
     try {
-      const roomName = session.liveKitRoomName;
-      const webinarData = {
-        roomId: roomName,
-        userId: auth?.user?.id || 'host',
-        userName: auth?.user?.name || 'Host',
+      // Start the session if it's still scheduled
+      if (session.status === 'scheduled') {
+        await startSession(id);
+      }
+      // Get a host LiveKit token
+      const data = await getHostToken(id);
+      const roomName = data.roomName;
+      const classroomData = {
+        participantName: auth?.user?.name || 'Host',
         isHost: true,
         sessionId: id,
+        liveKitToken: data.livekitToken,
+        livekitUrl: getLiveKitUrl(),
       };
-      saveWebinarSession(roomName, webinarData);
-      navigate(`/webinar/${roomName}`, { state: webinarData });
-    } catch (err: any) { alert(err.message); }
-    finally { setActionLoading(null); }
+      saveClassroomSession(roomName, classroomData);
+      navigate(`/class/${roomName}`, { state: classroomData });
+    } catch (err: any) {
+      alert(`Failed to join: ${err.message}`);
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   if (loading) return <div className="flex-col flex-center" style={{ height: '100vh' }}><div style={{ width: '40px', height: '40px', border: '3px solid var(--border-color)', borderTopColor: 'var(--primary-color)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /></div>;
@@ -207,21 +212,20 @@ export default function SessionDetail() {
             </div>
 
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {isScheduled && (
-                <button className="btn btn-primary" onClick={handleStart} disabled={!!actionLoading}>
-                  <Play size={15} /> Start Session
+              {(isScheduled || isLive) && (
+                <button className="btn btn-primary" onClick={handleStartAndJoin} disabled={!!actionLoading}
+                  style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)' }}>
+                  {actionLoading === 'host'
+                    ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Joining...</>
+                    : <><Video size={15} /> {isLive ? 'Re-join as Host' : 'Start & Join as Host'}</>
+                  }
                 </button>
               )}
               {isLive && (
-                <>
-                  <button className="btn btn-primary" onClick={handleJoinAsHost} disabled={!!actionLoading}>
-                    <LogIn size={15} /> Join as Host
-                  </button>
-                  <button className="btn" onClick={handleEnd} disabled={!!actionLoading}
-                    style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--error-color)' }}>
-                    <Square size={15} /> End Session
-                  </button>
-                </>
+                <button className="btn" onClick={handleEnd} disabled={!!actionLoading}
+                  style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--error-color)' }}>
+                  <Square size={15} /> End Session
+                </button>
               )}
             </div>
           </div>
