@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JoinService } from './join.service';
 import { JoinController } from './join.controller';
 import { UserEntity } from '../database/entities/user.entity';
@@ -13,6 +15,16 @@ import { LiveKitModule } from '../livekit/livekit.module';
     TypeOrmModule.forFeature([UserEntity, AttendanceEntity, SessionEntity]),
     InvitesModule,
     LiveKitModule,
+    ConfigModule,
+    // JwtModule is needed so JoinService can issue signal tokens (app JWT_SECRET)
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (cs: ConfigService) => ({
+        secret: cs.get<string>('JWT_SECRET', 'dev-secret-change-me'),
+        signOptions: { expiresIn: '6h' },
+      }),
+      inject: [ConfigService],
+    }),
   ],
   controllers: [JoinController],
   providers: [JoinService],

@@ -1,5 +1,7 @@
 export interface ClassroomSessionData {
   liveKitToken: string;
+  /** App JWT (JWT_SECRET) for the signal WebSocket gateway. Separate from liveKitToken. */
+  signalToken?: string;
   livekitUrl?: string;
   participantName: string;
   isHost: boolean;
@@ -52,12 +54,33 @@ export function getSignalServerUrl(): string {
   return `${wsOrigin}/signal`;
 }
 
-/** @deprecated — use SIGNAL_SERVER_URL for the new WebRTC flow */
+/**
+ * Returns the LiveKit server URL to pass to <LiveKitRoom serverUrl={...}>.
+ *
+ * LOCAL DEV  — Use the Vite dev server proxy path (/livekit).
+ *   The Vite proxy rewrites ws://localhost:5173/livekit → ws://localhost:7880.
+ *   This keeps the browser talking to localhost:5173 so LiveKit's node_ip
+ *   (127.0.0.1) ICE candidates are reachable. Direct ws://localhost:7880
+ *   bypasses the proxy and causes ICE failures on some network configs.
+ *
+ * PRODUCTION — Set VITE_LIVEKIT_URL=wss://your-livekit-domain.com in .env.
+ *   Or leave empty to use the /livekit proxy path on your own server.
+ */
 export function getLiveKitUrl(): string {
+  // Explicit env override (production / LiveKit Cloud)
   const envUrl = (import.meta as any).env?.VITE_LIVEKIT_URL;
   if (envUrl) return envUrl;
-  const { hostname, origin } = window.location;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'ws://localhost:7880';
-  const wsOrigin = origin.replace(/^https/, 'wss').replace(/^http/, 'ws');
-  return `${wsOrigin}/livekit`;
+
+  const { hostname, protocol, port } = window.location;
+  const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
+
+  // Local dev: use the proxy path instead of direct ws://localhost:7880
+  // Vite dev server listens on port 5173 and proxies /livekit → 7880
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const devPort = port || '5173';
+    return `${wsProto}//${hostname}:${devPort}/livekit`;
+  }
+
+  // Production / tunnel: use the same origin with /livekit proxy path
+  return `${wsProto}//${window.location.host}/livekit`;
 }

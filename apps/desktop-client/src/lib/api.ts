@@ -216,7 +216,7 @@ export async function joinSession(token: string, name: string): Promise<JoinToke
 
 // ─── Host Controls ───────────────────────────────────────────────────────────
 
-export async function getHostToken(sessionId: string): Promise<{ livekitToken: string; roomName: string }> {
+export async function getHostToken(sessionId: string): Promise<{ livekitToken: string; signalToken: string; roomName: string }> {
   const res = await apiFetch(`${API_BASE}/join/host-token`, {
     method: 'POST',
     headers: authHeaders(),
@@ -227,7 +227,7 @@ export async function getHostToken(sessionId: string): Promise<{ livekitToken: s
     throw new Error(err?.message || `Server error: ${res.status}`);
   }
   const data = await res.json();
-  return { livekitToken: data.livekitToken, roomName: data.roomName };
+  return { livekitToken: data.livekitToken, signalToken: data.signalToken ?? '', roomName: data.roomName };
 }
 
 export async function muteParticipant(sessionId: string, identity: string, trackSid: string): Promise<void> {

@@ -42,6 +42,6 @@ import { QuestionEntity } from '../database/entities/question.entity';
     QAService,
     ReactionService,
   ],
-  exports: [SignalService, PresenceService, ChatService, PollService, QAService],
+  exports: [SignalGateway, SignalService, PresenceService, ChatService, PollService, QAService],
 })
 export class SignalModule {}

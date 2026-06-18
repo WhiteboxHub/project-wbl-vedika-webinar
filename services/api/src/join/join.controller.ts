@@ -18,14 +18,20 @@ export class JoinController {
   @Post('token')
   async requestJoinToken(@Body() dto: JoinRequestDto) {
     return await this.joinService.requestJoin(dto.inviteToken, dto.userName);
+    // Response now includes: livekitToken, signalToken, livekitUrl, roomName, sessionId
   }
 
   @Post('host-token')
   @UseGuards(JwtAuthGuard)
   async requestHostToken(@Body() dto: HostTokenDto, @CurrentUser() user: AuthUser) {
-    const { token, roomName } = await this.joinService.issueInstructorToken(dto.sessionId, user.id, user.name);
+    const { token, signalToken, roomName } = await this.joinService.issueInstructorToken(
+      dto.sessionId,
+      user.id,
+      user.name,
+    );
     return {
       livekitToken: token,
+      signalToken,
       livekitUrl: '', // Client uses Vite proxy
       roomName,
       sessionId: dto.sessionId,

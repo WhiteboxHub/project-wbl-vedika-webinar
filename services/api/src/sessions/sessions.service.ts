@@ -1,15 +1,21 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SessionEntity } from '../database/entities/session.entity';
 import { CreateSessionRequest, UpdateSessionRequest, SessionStatus } from '@webinar/shared';
 import { randomBytes } from 'crypto';
+import { TokenService } from '../livekit/token.service';
+import { SignalService } from '../signal/signal.service';
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name);
+
   constructor(
     @InjectRepository(SessionEntity)
     private readonly sessionRepository: Repository<SessionEntity>,
+    private readonly tokenService: TokenService,
+    private readonly signalService: SignalService,
   ) {}
 
   async createSession(
@@ -97,7 +103,32 @@ export class SessionsService {
     session.status = SessionStatus.ENDED;
     session.endedAt = new Date();
 
-    return await this.sessionRepository.save(session);
+    const saved = await this.sessionRepository.save(session);
+
+    // ── Tear down LiveKit room ─────────────────────────────────────────────
+    // Deleting the room disconnects all participants from the media server.
+    // This is best-effort: if LiveKit is unreachable we log and continue.
+    try {
+      const roomClient = this.tokenService.getRoomServiceClient();
+      await roomClient.deleteRoom(session.liveKitRoomName);
+      this.logger.log(`[${session.liveKitRoomName}] LiveKit room deleted`);
+    } catch (err: any) {
+      // "Not found" is fine — room may already be empty
+      if (!err?.message?.includes('not found')) {
+        this.logger.warn(`[${session.liveKitRoomName}] deleteRoom failed: ${err.message}`);
+      }
+    }
+
+    // ── Notify all connected signal clients ───────────────────────────────
+    // Clients listen for 'session-ended' and show a "Session has ended" screen
+    // instead of being silently dropped.
+    this.signalService.broadcast(session.liveKitRoomName, 'session-ended', {
+      sessionId,
+      endedAt: saved.endedAt,
+    });
+    this.logger.log(`[${session.liveKitRoomName}] session-ended broadcast sent`);
+
+    return saved;
   }
 
   async listInstructorSessions(instructorId: string): Promise<SessionEntity[]> {

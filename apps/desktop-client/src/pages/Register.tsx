@@ -60,11 +60,8 @@ export default function Register() {
     
     setSubmitting(true);
     try {
-      const { inviteUrl } = await registerForWebinar(sessionId!, name, email);
+      const { token } = await registerForWebinar(sessionId!, name, email);
       
-      // Extract the token from webinar://join?token=XYZ and redirect directly
-      const url = new URL(inviteUrl);
-      const token = url.searchParams.get('token');
       if (token) {
         // Navigate directly into the waiting room — no copy-paste needed!
         navigate(`/waiting/${token}`);

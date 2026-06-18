@@ -98,7 +98,7 @@ export default function SessionDetail() {
       if (session.status === 'scheduled') {
         await startSession(id);
       }
-      // Get a host LiveKit token
+      // Get a host LiveKit + signal token
       const data = await getHostToken(id);
       const roomName = data.roomName;
       const classroomData = {
@@ -106,6 +106,7 @@ export default function SessionDetail() {
         isHost: true,
         sessionId: id,
         liveKitToken: data.livekitToken,
+        signalToken: data.signalToken,
         livekitUrl: getLiveKitUrl(),
       };
       saveClassroomSession(roomName, classroomData);

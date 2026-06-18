@@ -43,6 +43,7 @@ export default function WaitingRoom() {
         isHost: false,
         sessionId: (data as any).sessionId || '',
         liveKitToken: data.livekitToken,
+        signalToken: (data as any).signalToken ?? '',
         livekitUrl: getLiveKitUrl(),
       });
       navigate(`/class/${roomName}`, {
@@ -51,6 +52,7 @@ export default function WaitingRoom() {
           isHost: false,
           sessionId: (data as any).sessionId || '',
           liveKitToken: data.livekitToken,
+          signalToken: (data as any).signalToken ?? '',
           livekitUrl: getLiveKitUrl(),
         },
       });

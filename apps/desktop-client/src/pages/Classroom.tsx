@@ -12,12 +12,12 @@ import {
   useConnectionState,
   useRoomContext,
 } from '@livekit/components-react';
-import { ConnectionState, Track, ConnectionQuality } from 'livekit-client';
+import { ConnectionState, Track, ConnectionQuality, DisconnectReason } from 'livekit-client';
 import '@livekit/components-styles';
 import {
   Loader2, MicOff, UserX, Square, Users,
   MessageSquare, Hand, AlertCircle, Monitor, StopCircle,
-  BarChart2, HelpCircle, RotateCcw,
+  BarChart2, HelpCircle, RotateCcw, CheckCircle,
 } from 'lucide-react';
 import { removeParticipant, muteParticipant } from '../lib/api';
 import { loadClassroomSession, clearClassroomSession, getLiveKitUrl, getSignalServerUrl } from '../lib/classroom-session';
@@ -191,25 +191,55 @@ function Stage({ isHost, isPresenter, onLeave, sessionId: _sid, raisedHands: _rh
         )}
       </div>
 
-      {/* Controls */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px 14px', background: 'rgba(6,6,16,0.98)', borderTop: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
+      {/* Controls bar */}
+      <div style={{
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px',
+        padding: '10px 16px',
+        background: 'rgba(6,6,16,0.98)',
+        borderTop: '1px solid var(--border-color)',
+        flexWrap: 'wrap',
+      }}>
+        {/* LiveKit mic / camera buttons */}
         <div className="lk-ctrl-wrap">
-          <ControlBar variation="verbose" controls={{ microphone: true, camera: isHost || isPresenter, screenShare: false, leave: false }} />
+          <ControlBar
+            variation="minimal"
+            controls={{ microphone: true, camera: isHost || isPresenter, screenShare: false, leave: false }}
+          />
         </div>
 
+        {/* Divider */}
+        <div style={{ width: '1px', height: '28px', background: 'rgba(255,255,255,0.1)', margin: '0 4px', flexShrink: 0 }} />
+
         {canShare && (
-          <button onClick={toggleShare} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', background: sharing ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.07)', border: `1px solid ${sharing ? 'rgba(239,68,68,0.45)' : 'rgba(255,255,255,0.13)'}`, color: sharing ? '#ef4444' : 'var(--text-muted)', fontSize: '12px', fontWeight: 600 }}>
-            {sharing ? <StopCircle size={13} /> : <Monitor size={13} />}
-            {sharing ? 'Stop Share' : 'Screen Share'}
+          <button onClick={toggleShare} className="ctrl-btn" style={{
+            background: sharing ? 'rgba(239,68,68,0.18)' : undefined,
+            borderColor: sharing ? 'rgba(239,68,68,0.45)' : undefined,
+            color: sharing ? '#ef4444' : undefined,
+          }}>
+            {sharing ? <StopCircle size={14} /> : <Monitor size={14} />}
+            <span>{sharing ? 'Stop Share' : 'Share Screen'}</span>
           </button>
         )}
 
-        <button onClick={toggleHand} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', background: handRaised ? 'rgba(234,179,8,0.18)' : 'rgba(255,255,255,0.07)', border: `1px solid ${handRaised ? 'rgba(234,179,8,0.45)' : 'rgba(255,255,255,0.13)'}`, color: handRaised ? '#eab308' : 'var(--text-muted)', fontSize: '12px', fontWeight: 600 }}>
-          <Hand size={13} /> {handRaised ? 'Lower Hand' : 'Raise Hand'}
+        <button onClick={toggleHand} className="ctrl-btn" style={{
+          background: handRaised ? 'rgba(234,179,8,0.18)' : undefined,
+          borderColor: handRaised ? 'rgba(234,179,8,0.45)' : undefined,
+          color: handRaised ? '#eab308' : undefined,
+        }}>
+          <Hand size={14} />
+          <span>{handRaised ? 'Lower Hand' : 'Raise Hand'}</span>
         </button>
 
-        <button onClick={onLeave} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer', background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.38)', color: '#ef4444', fontSize: '12px', fontWeight: 600 }}>
-          <Square size={13} /> {isHost ? 'End Session' : 'Leave'}
+        {/* Divider */}
+        <div style={{ width: '1px', height: '28px', background: 'rgba(255,255,255,0.1)', margin: '0 4px', flexShrink: 0 }} />
+
+        <button onClick={onLeave} className="ctrl-btn ctrl-btn-danger">
+          <Square size={14} />
+          <span>{isHost ? 'End Session' : 'Leave'}</span>
         </button>
       </div>
     </div>
@@ -217,6 +247,8 @@ function Stage({ isHost, isPresenter, onLeave, sessionId: _sid, raisedHands: _rh
 }
 
 // ─── Main Classroom ───────────────────────────────────────────────────────────
+
+
 
 export default function Classroom() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -236,10 +268,25 @@ export default function Classroom() {
   const role: Role = isHost ? 'host' : 'attendee';
   const isPresenter = false; // future: derive from token metadata
 
+  /**
+   * signalToken: app JWT used exclusively for the signal gateway (JWT_SECRET).
+   * Falls back to liveKitToken if absent for backward compat during rolling deploy,
+   * but that will fail gateway auth — the UI will just show no chat/polls.
+   */
+  const signalToken: string = sessionData?.signalToken || liveKitToken;
+
   const [activeTab, setActiveTab] = useState<SideTab>('chat');
   const [error, setError] = useState<string | null>(null);
-  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null); // non-fatal, shown as toast
+
+  // ── Reconnect state machine ──────────────────────────────────────────────
+  // 'connected' | 'reconnecting' | 'ended'
+  const [connStatus, setConnStatus] = useState<'connected' | 'reconnecting' | 'ended'>('connected');
   const [reconnectCount, setReconnectCount] = useState(0);
+
+  // Set to true ONLY when the user explicitly clicks "Leave" / "End Session".
+  // CLIENT_INITIATED from React StrictMode cleanup must NOT navigate away.
+  const userInitiatedLeaveRef = useRef(false);
 
   // Signal state
   const sigRef = useRef<SignalingClient | null>(null);
@@ -252,14 +299,20 @@ export default function Classroom() {
   const [questions, setQuestions] = useState<QuestionData[]>([]);
 
   useEffect(() => {
-    if (!liveKitToken || !roomId) return;
+    if (!signalToken || !roomId) return;
 
     const sig = new SignalingClient(getSignalServerUrl());
     sigRef.current = sig;
 
-    sig.onConnected = () => { sig.joinRoom(roomId, liveKitToken, participantName, role); };
-    sig.onDisconnected = () => { setIsReconnecting(true); setReconnectCount(c => c + 1); };
-    sig.onConnected = () => { setIsReconnecting(false); sig.joinRoom(roomId, liveKitToken, participantName, role); };
+    sig.onConnected = () => {
+      setConnStatus('connected');
+      // Use signalToken (app JWT) — NOT liveKitToken — so the gateway can validate it
+      sig.joinRoom(roomId, signalToken, participantName, role);
+    };
+    sig.onDisconnected = () => {
+      setConnStatus(prev => prev === 'ended' ? 'ended' : 'reconnecting');
+      setReconnectCount(c => c + 1);
+    };
 
     sig.onRoomState = (d) => {
       if (d?.history) setChatMessages(d.history);
@@ -283,9 +336,13 @@ export default function Classroom() {
     sig.onQuestionAnswered = (q) => setQuestions(prev => prev.map(x => x.id === q.id ? q : x));
     sig.onQuestionUpvoted = (d) => setQuestions(prev => prev.map(x => x.id === d.id ? { ...x, upvotes: d.upvotes } : x));
 
+    // 'session-ended' is broadcast by the API when host calls endSession.
+    // SignalingClient also stops auto-reconnecting when it receives this event.
+    sig.onSessionEnded = () => setConnStatus('ended');
+
     sig.connect();
     return () => { sig.disconnect(); };
-  }, [liveKitToken, roomId]);
+  }, [signalToken, roomId]);
 
   const handleSendChat = useCallback((m: string) => sigRef.current?.sendChat(m), []);
   const handleReact = useCallback((t: ReactionType) => sigRef.current?.sendReaction(t), []);
@@ -298,11 +355,49 @@ export default function Classroom() {
   const handleAnswerQ = useCallback((id: string, a: string) => sigRef.current?.answerQuestion(id, a), []);
   const handleUpvoteQ = useCallback((id: string) => sigRef.current?.upvoteQuestion(id), []);
 
+  /** Called when the user explicitly clicks "End Session" or "Leave" */
   function handleLeave() {
+    userInitiatedLeaveRef.current = true;
     if (roomId) clearClassroomSession(roomId);
     navigate(isHost ? '/dashboard' : '/');
   }
 
+  /**
+   * Called by LiveKitRoom's onDisconnected.
+   *
+   * Strategy:
+   *   - User clicked Leave (userInitiatedLeaveRef) → navigate away
+   *   - DUPLICATE_IDENTITY / ROOM_DELETED → navigate away
+   *   - CLIENT_INITIATED without user action = React StrictMode cleanup in dev
+   *     → show reconnecting overlay, let LiveKit SDK auto-reconnect
+   *   - Everything else (ICE fail, network blip) → reconnecting overlay
+   */
+  function handleLkDisconnected(reason?: DisconnectReason) {
+    if (connStatus === 'ended') {
+      // session-ended was already received from signal — navigate
+      if (roomId) clearClassroomSession(roomId);
+      navigate(isHost ? '/dashboard' : '/');
+      return;
+    }
+
+    // Only navigate on CLIENT_INITIATED if the user actually clicked Leave.
+    // React StrictMode fires CLIENT_INITIATED during cleanup — we must ignore that.
+    const isUserLeave = userInitiatedLeaveRef.current;
+    const isServerEnded =
+      reason === DisconnectReason.DUPLICATE_IDENTITY ||
+      reason === DisconnectReason.ROOM_DELETED;
+
+    if (isUserLeave || isServerEnded) {
+      if (roomId) clearClassroomSession(roomId);
+      navigate(isHost ? '/dashboard' : '/');
+    } else {
+      // Transient failure OR StrictMode cleanup — show reconnecting overlay
+      setConnStatus('reconnecting');
+      setReconnectCount(c => c + 1);
+    }
+  }
+
+  // ── No token guard ────────────────────────────────────────────────────────
   if (!liveKitToken) {
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
@@ -313,6 +408,23 @@ export default function Classroom() {
     );
   }
 
+  // ── Session ended screen (host ended via endSession API) ──────────────────
+  if (connStatus === 'ended') {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', padding: '20px', textAlign: 'center' }}>
+        <CheckCircle size={56} color="#10b981" />
+        <h2 style={{ fontSize: '22px' }}>Session has ended</h2>
+        <p style={{ color: 'var(--text-muted)', maxWidth: '360px' }}>
+          {isHost ? 'You ended this session.' : 'The host has ended this session.'}
+        </p>
+        <button className="btn btn-primary" onClick={() => { if (roomId) clearClassroomSession(roomId); navigate(isHost ? '/dashboard' : '/'); }}>
+          {isHost ? 'Back to Dashboard' : 'Go Home'}
+        </button>
+      </div>
+    );
+  }
+
+  // ── LiveKit connection error ───────────────────────────────────────────────
   if (error) {
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '20px', textAlign: 'center' }}>
@@ -339,8 +451,8 @@ export default function Classroom() {
       <LiveKitRoom
         token={liveKitToken}
         serverUrl={livekitUrl}
-        video={isHost}
-        audio={isHost}
+        video={false}
+        audio={false}
         connect={true}
         data-lk-theme="default"
         options={{
@@ -351,15 +463,62 @@ export default function Classroom() {
           },
         }}
         style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}
-        onDisconnected={handleLeave}
-        onError={(err) => setError(err.message)}
+        onDisconnected={handleLkDisconnected}
+        onError={(err) => {
+          const msg = (err?.message ?? '').toLowerCase();
+
+          // ── Ignore disconnect-flavoured messages ──────────────────────────
+          // LiveKit fires these through onError during StrictMode cleanup or
+          // normal room teardown. onDisconnected already handles them.
+          if (
+            msg.includes('client initiated') ||
+            msg.includes('duplicate identity') ||
+            msg.includes('room deleted') ||
+            msg.includes('room not found')
+          ) return;
+
+          // ── Camera / mic errors → non-fatal toast ─────────────────────────
+          // These don't kill the connection — the host can still present and
+          // use chat/polls. Show a dismissible notice instead of a full error screen.
+          if (
+            msg.includes('video source') ||
+            msg.includes('audio source') ||
+            msg.includes('could not start') ||
+            msg.includes('permission denied') ||
+            msg.includes('notallowederror') ||
+            msg.includes('notfounderror') ||
+            msg.includes('notreadableerror')
+          ) {
+            setCameraError(err.message);
+            return;
+          }
+
+          // ── Everything else → fatal error screen ──────────────────────────
+          setError(err.message);
+        }}
       >
-        {/* Reconnect overlay */}
-        {isReconnecting && (
+        {/* Reconnecting overlay — shown on transient failures, NOT on intentional leave */}
+        {connStatus === 'reconnecting' && (
           <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.85)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
             <RotateCcw size={38} color="var(--primary-color)" style={{ animation: 'spin 1s linear infinite' }} />
-            <p style={{ color: '#fff', fontWeight: 600 }}>Reconnecting to signal server… (attempt {reconnectCount})</p>
+            <p style={{ color: '#fff', fontWeight: 600 }}>Reconnecting… (attempt {reconnectCount})</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Please wait — this usually resolves in a few seconds.</p>
             <button className="btn btn-secondary" onClick={handleLeave}>Leave Session</button>
+          </div>
+        )}
+
+        {/* Camera / mic error toast — non-fatal, dismissible */}
+        {cameraError && (
+          <div style={{ position: 'fixed', bottom: '20px', left: '20px', zIndex: 40, maxWidth: '340px', background: 'rgba(20,10,40,0.97)', border: '1px solid rgba(234,179,8,0.4)', borderRadius: '12px', padding: '14px 16px', display: 'flex', gap: '12px', alignItems: 'flex-start', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
+            <AlertCircle size={18} color="#eab308" style={{ flexShrink: 0, marginTop: '1px' }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontWeight: 700, fontSize: '13px', color: '#eab308', marginBottom: '4px' }}>Camera / mic unavailable</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                Could not access your camera or microphone. You can still use chat, polls, and Q&amp;A.
+                Click the 🎙 button in the controls to try again.
+              </p>
+            </div>
+            <button onClick={() => setCameraError(null)} style={{ flexShrink: 0, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '2px' }}>✕</button>
           </div>
         )}
 
@@ -407,14 +566,74 @@ export default function Classroom() {
       <style>{`
         @keyframes spin  { to { transform: rotate(360deg); } }
         @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.6; transform:scale(1.15); } }
+
+        /* ── LiveKit control bar overrides ───────────────────────────── */
         .lk-ctrl-wrap { display:flex; align-items:center; }
-        .lk-control-bar { background:transparent!important; border:none!important; padding:0!important; gap:6px!important; }
-        .lk-button { background:rgba(255,255,255,0.08)!important; border:1px solid rgba(255,255,255,0.12)!important; border-radius:8px!important; color:#fff!important; width:42px!important; height:36px!important; }
-        .lk-button:hover { background:rgba(255,255,255,0.15)!important; }
-        .lk-button[aria-pressed="true"] { background:rgba(239,68,68,0.2)!important; border-color:rgba(239,68,68,0.4)!important; color:#ef4444!important; }
-        .lk-grid-layout { background:transparent!important; }
-        .lk-participant-tile { border-radius:12px!important; overflow:hidden!important; }
-        .lk-participant-placeholder { background:rgba(124,58,237,0.15)!important; }
+        .lk-control-bar {
+          background: transparent !important;
+          border: none !important;
+          padding: 0 !important;
+          gap: 6px !important;
+        }
+        /* minimal variation: icon-only buttons — size them like our ctrl-btn */
+        .lk-button {
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          min-width: 40px !important;
+          height: 36px !important;
+          padding: 0 10px !important;
+          background: rgba(255,255,255,0.08) !important;
+          border: 1px solid rgba(255,255,255,0.12) !important;
+          border-radius: 8px !important;
+          color: #fff !important;
+          font-size: 12px !important;
+          font-weight: 600 !important;
+          cursor: pointer !important;
+          gap: 5px !important;
+          transition: background 0.15s, border-color 0.15s !important;
+        }
+        .lk-button:hover { background: rgba(255,255,255,0.15) !important; }
+        .lk-button[aria-pressed="true"],
+        .lk-button[data-lk-source="microphone"][aria-pressed="true"],
+        .lk-button[data-lk-source="camera"][aria-pressed="true"] {
+          background: rgba(239,68,68,0.18) !important;
+          border-color: rgba(239,68,68,0.4) !important;
+          color: #ef4444 !important;
+        }
+
+        /* ── Custom control buttons (Share / Hand / Leave) ───────────── */
+        .ctrl-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 0 12px;
+          height: 36px;
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,0.13);
+          background: rgba(255,255,255,0.07);
+          color: var(--text-muted);
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+          white-space: nowrap;
+        }
+        .ctrl-btn:hover { background: rgba(255,255,255,0.13); color: #fff; }
+        .ctrl-btn span { line-height: 1; }
+
+        .ctrl-btn-danger {
+          background: rgba(239,68,68,0.14) !important;
+          border-color: rgba(239,68,68,0.38) !important;
+          color: #ef4444 !important;
+        }
+        .ctrl-btn-danger:hover { background: rgba(239,68,68,0.25) !important; }
+
+        /* ── Video grid ──────────────────────────────────────────────── */
+        .lk-grid-layout { background: transparent !important; }
+        .lk-participant-tile { border-radius: 12px !important; overflow: hidden !important; }
+        .lk-participant-placeholder { background: rgba(124,58,237,0.15) !important; }
       `}</style>
     </div>
   );

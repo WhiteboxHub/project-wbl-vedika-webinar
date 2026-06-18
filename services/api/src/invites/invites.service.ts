@@ -50,7 +50,10 @@ export class InvitesService {
     });
 
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
-    const inviteUrl = `webinar://join?token=${token}`;
+    const publicAppUrl = this.configService.get<string>('PUBLIC_APP_URL', '');
+    const inviteUrl = publicAppUrl
+      ? `${publicAppUrl}/waiting/${token}`
+      : `webinar://join?token=${token}`;
 
     return {
       id: sessionId,

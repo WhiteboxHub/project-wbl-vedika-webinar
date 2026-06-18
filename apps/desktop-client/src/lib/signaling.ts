@@ -40,6 +40,8 @@ export class SignalingClient {
   public onQuestionAnswered: ((q: any) => void) | null = null;
   public onQuestionUpvoted: ((data: { id: string; upvotes: number }) => void) | null = null;
   public onParticipantAdmitted: ((data: any) => void) | null = null;
+  /** Fired when the host ends the session server-side. Stop reconnecting; show ended screen. */
+  public onSessionEnded: ((data: any) => void) | null = null;
 
   constructor(private readonly serverUrl: string) {}
 
@@ -129,6 +131,12 @@ export class SignalingClient {
         case 'question-answered': this.onQuestionAnswered?.(d); break;
         case 'question-upvoted': this.onQuestionUpvoted?.(d); break;
         case 'participant-admitted': this.onParticipantAdmitted?.(d); break;
+        case 'session-ended':
+          // Stop trying to reconnect — the room is gone intentionally
+          this.shouldReconnect = false;
+          this.clearReconnectTimer();
+          this.onSessionEnded?.(d);
+          break;
         case 'error': this.onError?.(d?.message ?? 'Unknown server error'); break;
       }
     };
