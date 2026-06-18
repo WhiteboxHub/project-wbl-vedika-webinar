@@ -1,4 +1,3 @@
-import React from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 
 // Join page now simply redirects to the unified WaitingRoom

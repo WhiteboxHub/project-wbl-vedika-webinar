@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Room, RoomEvent, ConnectionState } from 'livekit-client';
 
 /**
@@ -12,7 +12,7 @@ export default function TestLiveKit() {
   const [authToken, setAuthToken] = useState('');
   const [lkToken, setLkToken] = useState('');
   const [roomName, setRoomName] = useState('');
-  const [sessionId, setSessionId] = useState('');
+  const [_sessionId, setSessionId] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
 
   function log(msg: string, type = '') {
@@ -100,7 +100,7 @@ export default function TestLiveKit() {
       });
 
       room.on(RoomEvent.Connected, () => {
-        log(`✅✅✅ CONNECTED! Room: ${room.name}, SID: ${room.sid}`, 'ok');
+        log(`✅✅✅ CONNECTED! Room: ${room.name}`, 'ok');
         log(`Local participant: ${room.localParticipant.identity} (${room.localParticipant.name})`, 'ok');
         log(`Remote participants: ${room.remoteParticipants.size}`, 'ok');
         setStep(4);

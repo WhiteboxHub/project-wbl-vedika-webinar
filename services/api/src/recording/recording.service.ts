@@ -84,7 +84,7 @@ export class RecordingService {
       const rawFilename = `${egressId}.mp4`;
       const rawPath = path.join(sessionDir, 'raw', rawFilename);
 
-      const roomName = `session_${sessionId}`;
+      const roomName = session.liveKitRoomName;
 
       this.logger.log(`Starting LiveKit Egress for room ${roomName}`);
 

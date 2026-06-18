@@ -67,6 +67,28 @@ export class TokenService {
     });
   }
 
+  async generatePresenterToken(roomName: string, identity: string, name: string): Promise<string> {
+    return await this.generateToken({
+      roomName,
+      identity,
+      name,
+      canPublish: true,
+      canSubscribe: true,
+      metadata: JSON.stringify({ role: 'presenter' }),
+    });
+  }
+
+  async generateModeratorToken(roomName: string, identity: string, name: string): Promise<string> {
+    return await this.generateToken({
+      roomName,
+      identity,
+      name,
+      canPublish: false,
+      canSubscribe: true,
+      metadata: JSON.stringify({ role: 'moderator' }),
+    });
+  }
+
   getRoomServiceClient(): RoomServiceClient {
     return new RoomServiceClient(this.livekitUrl, this.apiKey, this.apiSecret);
   }

@@ -168,3 +168,63 @@ h1, h2, h3 {
 .lk-room-container {
   background-color: transparent !important;
 }
+
+/* ─── Speaking glow indicator ─────────────────────────────────────────────── */
+@keyframes speaking-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(16,185,129,0.45); }
+  50%       { box-shadow: 0 0 0 4px rgba(16,185,129,0.75), 0 0 20px rgba(16,185,129,0.2); }
+}
+.speaking-indicator {
+  animation: speaking-glow 1s ease-in-out infinite;
+  border: 2px solid rgba(16,185,129,0.6) !important;
+}
+
+/* ─── Network quality ─────────────────────────────────────────────────────── */
+.quality-excellent { color: #10b981; }
+.quality-good      { color: #f59e0b; }
+.quality-poor      { color: #ef4444; }
+
+/* ─── Recording status badges ─────────────────────────────────────────────── */
+.recording-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.recording-badge.recording {
+  background: rgba(239,68,68,0.18);
+  color: #ef4444;
+  border: 1px solid rgba(239,68,68,0.38);
+}
+.recording-badge.recording::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1s ease-in-out infinite;
+}
+.recording-badge.processing {
+  background: rgba(245,158,11,0.14);
+  color: #f59e0b;
+  border: 1px solid rgba(245,158,11,0.3);
+}
+.recording-badge.ready {
+  background: rgba(16,185,129,0.14);
+  color: #10b981;
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.recording-badge.failed {
+  background: rgba(239,68,68,0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239,68,68,0.3);
+}
+
+/* ─── Participant tile speaking border ────────────────────────────────────── */
+.lk-participant-tile[data-lk-speaking="true"] {
+  outline: 2px solid rgba(16,185,129,0.6) !important;
+  outline-offset: -2px;
+}
+

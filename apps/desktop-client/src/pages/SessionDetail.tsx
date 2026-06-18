@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getSession, generateInviteLink, startSession, endSession, getStoredAuth, Session, getHostToken } from '../lib/api';
 import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
@@ -7,11 +7,6 @@ import { ArrowLeft, Copy, Check, Square, Users, Clock, Radio, Video, Globe, Aler
 // Persist tunnel URL across sessions
 const TUNNEL_KEY = 'webinar_tunnel_url';
 
-function getPublicOrigin(): string {
-  const stored = localStorage.getItem(TUNNEL_KEY);
-  if (stored) return stored.replace(/\/$/, '');
-  return window.location.origin;
-}
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>();

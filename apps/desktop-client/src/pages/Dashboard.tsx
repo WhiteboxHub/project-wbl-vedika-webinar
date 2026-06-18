@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSessions, startSession, endSession, generateInviteLink, clearAuth, getStoredAuth, Session } from '../lib/api';
 import { Plus, LogOut, Video, Copy, Check, Play, Square, Clock, Radio, XCircle, Users, ChevronRight } from 'lucide-react';

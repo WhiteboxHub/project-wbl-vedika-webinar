@@ -1,195 +1,224 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { resolveInvite, joinSession, ResolveInviteResponse } from '../lib/api';
+import { resolveInvite, joinSession } from '../lib/api';
 import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
-import { Loader2, Radio, Clock, Users, LogIn } from 'lucide-react';
+import { Loader2, Radio, Clock, Users, LogIn, CheckCircle, XCircle } from 'lucide-react';
+
+type State = 'loading' | 'name-entry' | 'waiting' | 'joining' | 'error';
+
+interface SessionInfo {
+  title: string;
+  description?: string;
+  status: string;
+  instructorName: string;
+  scheduledAt?: string;
+  registeredName?: string;
+}
 
 export default function WaitingRoom() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const [session, setSession] = useState<ResolveInviteResponse | null>(null);
-  const [name, setName] = useState('');
-  const [nameConfirmed, setNameConfirmed] = useState(false);
-  const [joining, setJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [dots, setDots] = useState('');
 
-  // Animated dots
+  const [state, setState] = useState<State>('loading');
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [name, setName] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [dots, setDots] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Animated waiting dots
   useEffect(() => {
-    const interval = setInterval(() => setDots(d => d.length >= 3 ? '' : d + '.'), 600);
-    return () => clearInterval(interval);
+    const t = setInterval(() => setDots(d => d.length >= 3 ? '' : d + '.'), 600);
+    return () => clearInterval(t);
   }, []);
 
-  // Load session initially
-  useEffect(() => {
-    if (!token) { navigate('/'); return; }
-    loadSession();
-  }, [token]);
-
-  // (polling removed — attendees join immediately via LiveKit room; they wait in-room for the host to publish)
-
-  async function loadSession() {
+  const doJoin = useCallback(async (joinName: string) => {
+    if (!token) return;
+    setState('joining');
     try {
-      const data = await resolveInvite(token!);
-      setSession(data);
-      if (data.registeredName) {
-        // Pre-registered attendee: set name and auto-join immediately
-        setName(data.registeredName);
-        setNameConfirmed(true);
-        setTimeout(() => handleJoinRef(data.registeredName!), 0);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Invalid invite link');
-    }
-  }
-
-  async function handleJoinRef(joinName: string) {
-    if (!token || !joinName.trim() || joining) return;
-    setJoining(true);
-    try {
-      const liveKitData = await joinSession(token, joinName);
-      const roomName = liveKitData.roomName;
-      const classroomData = {
+      const data = await joinSession(token, joinName);
+      const roomName = data.roomName;
+      saveClassroomSession(roomName, {
         participantName: joinName,
         isHost: false,
-        sessionId: liveKitData.sessionId || '',
-        liveKitToken: liveKitData.livekitToken,
-        livekitUrl: getLiveKitUrl(), // always derive dynamically — backend returns ''
-      };
-      saveClassroomSession(roomName, classroomData);
-      navigate(`/class/${roomName}`, { state: classroomData });
+        sessionId: (data as any).sessionId || '',
+        liveKitToken: data.livekitToken,
+        livekitUrl: getLiveKitUrl(),
+      });
+      navigate(`/class/${roomName}`, {
+        state: {
+          participantName: joinName,
+          isHost: false,
+          sessionId: (data as any).sessionId || '',
+          liveKitToken: data.livekitToken,
+          livekitUrl: getLiveKitUrl(),
+        },
+      });
     } catch (err: any) {
-      setError(err.message || 'Failed to join');
-      setJoining(false);
+      setState('error');
+      setErrorMsg(err.message || 'Failed to join session');
     }
-  }
+  }, [token, navigate]);
 
-  async function handleJoin() {
-    return handleJoinRef(name);
-  }
+  useEffect(() => {
+    if (!token) { navigate('/'); return; }
+    resolveInvite(token)
+      .then((data: any) => {
+        setSession(data);
+        if (data.registeredName) {
+          setName(data.registeredName);
+          if (data.status === 'live') doJoin(data.registeredName);
+          else setState('waiting');
+        } else {
+          setState('name-entry');
+        }
+      })
+      .catch((err: any) => { setState('error'); setErrorMsg(err.message || 'Invalid invite link'); });
+  }, [token]);
+
+  // Poll for session going live when waiting
+  useEffect(() => {
+    if (state !== 'waiting' || !token || !name) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const data: any = await resolveInvite(token);
+        if (data.status === 'live') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          doJoin(name);
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [state, token, name, doJoin]);
 
   function handleNameSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
-    setNameConfirmed(true);
-    // Allow joining regardless of status — backend handles SCHEDULED rooms fine
-    // (LiveKit auto-creates rooms on first join; attendee waits for host to publish)
-    handleJoinRef(name);
+    const n = name.trim();
+    if (!n || !session) return;
+    if (session.status === 'live') doJoin(n);
+    else setState('waiting');
   }
 
-  if (error) {
+  // ── Error ──
+  if (state === 'error') {
     return (
-      <div className="flex-col flex-center" style={{ height: '100vh' }}>
-        <div className="glass-panel flex-col flex-center fade-in" style={{ maxWidth: '400px', textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '16px' }}>❌</div>
-          <h2>Invalid Invite</h2>
-          <p className="text-muted" style={{ margin: '12px 0 24px' }}>{error}</p>
-          <button className="btn btn-secondary" onClick={() => navigate('/')}>Return Home</button>
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+        <div className="glass-panel" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', padding: '40px' }}>
+          <XCircle size={48} color="var(--error-color)" style={{ marginBottom: '16px' }} />
+          <h2 style={{ marginBottom: '10px' }}>Unable to Join</h2>
+          <p className="text-muted" style={{ marginBottom: '24px' }}>{errorMsg}</p>
+          <button className="btn btn-secondary" onClick={() => navigate('/')} style={{ width: '100%' }}>Return Home</button>
         </div>
       </div>
     );
   }
 
-  if (!session) {
+  // ── Loading ──
+  if (state === 'loading') {
     return (
-      <div className="flex-col flex-center" style={{ height: '100vh' }}>
-        <Loader2 size={40} color="var(--primary-color)" style={{ animation: 'spin 1s linear infinite' }} />
-        <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 size={38} color="var(--primary-color)" style={{ animation: 'spin 1s linear infinite' }} />
+        <style>{`@keyframes spin{100%{transform:rotate(360deg)}}`}</style>
       </div>
     );
   }
 
-  // Step 1: Enter name
-  if (!nameConfirmed) {
+  // ── Joining ──
+  if (state === 'joining') {
     return (
-      <div className="flex-col flex-center" style={{ height: '100vh', padding: '20px' }}>
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="glass-panel" style={{ padding: '48px 64px', textAlign: 'center' }}>
+          <CheckCircle size={48} color="#10b981" style={{ marginBottom: '16px' }} />
+          <h2 style={{ marginBottom: '8px' }}>Joining session…</h2>
+          <p className="text-muted" style={{ marginBottom: '24px' }}>Setting up your connection</p>
+          <Loader2 size={24} color="var(--primary-color)" style={{ animation: 'spin 1s linear infinite' }} />
+        </div>
+        <style>{`@keyframes spin{100%{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+  }
+
+  // ── Name Entry ──
+  if (state === 'name-entry' && session) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', position: 'relative', overflow: 'hidden' }}>
         <div className="bg-orb" style={{ width: '350px', height: '350px', top: '-80px', left: '-80px' }} />
+        <div className="bg-orb" style={{ width: '280px', height: '280px', bottom: '-60px', right: '-60px', animationDelay: '1.5s' }} />
+
         <div className="glass-panel fade-in" style={{ width: '100%', maxWidth: '440px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <h2 style={{ fontSize: '22px', marginBottom: '6px' }}>{session.title}</h2>
-            <p className="text-muted">Hosted by {session.instructorName}</p>
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: '6px',
-              marginTop: '12px', padding: '4px 14px', borderRadius: '20px', fontSize: '13px',
-              background: session.status === 'live' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.08)',
-              color: session.status === 'live' ? '#10b981' : 'var(--text-muted)',
-            }}>
-              {session.status === 'live' ? <><Radio size={12} /> LIVE</> : <><Clock size={12} /> {session.status.toUpperCase()}</>}
+          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+            <div style={{ width: '60px', height: '60px', borderRadius: '16px', background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Radio size={26} color="white" />
+            </div>
+            <h2 style={{ fontSize: '21px', marginBottom: '5px' }}>{session.title}</h2>
+            <p className="text-muted" style={{ fontSize: '14px' }}>Hosted by {session.instructorName}</p>
+            {session.scheduledAt && (
+              <p className="text-muted" style={{ fontSize: '12px', marginTop: '4px' }}>
+                <Clock size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
+                {new Date(session.scheduledAt).toLocaleString()}
+              </p>
+            )}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', background: session.status === 'live' ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.08)', color: session.status === 'live' ? '#10b981' : 'var(--text-muted)' }}>
+              {session.status === 'live' ? <><Radio size={11} /> LIVE</> : <><Clock size={11} /> {session.status.toUpperCase()}</>}
             </div>
           </div>
 
-          <form onSubmit={handleNameSubmit} className="flex-col gap-6">
-            <div className="flex-col" style={{ gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Your Display Name</label>
-              <input
-                type="text" className="input-field"
-                placeholder="Enter your name"
-                value={name} onChange={e => setName(e.target.value)}
-                autoFocus required
-              />
+          <form onSubmit={handleNameSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Your Display Name</label>
+              <input type="text" className="input-field" placeholder="Enter your name" value={name} onChange={e => setName(e.target.value)} autoFocus required />
             </div>
-            <button type="submit" className="btn btn-primary" disabled={!name.trim()} style={{ width: '100%' }}>
-              <LogIn size={16} />
+            <button type="submit" className="btn btn-primary" disabled={!name.trim()} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <LogIn size={15} />
               {session.status === 'live' ? 'Join Now' : 'Enter Waiting Room'}
             </button>
           </form>
         </div>
-        <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+        <style>{`@keyframes spin{100%{transform:rotate(360deg)}}`}</style>
       </div>
     );
   }
 
-  // Step 2: Waiting for host
+  // ── Waiting ──
   return (
-    <div className="flex-col flex-center" style={{ height: '100vh', padding: '20px', textAlign: 'center' }}>
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', position: 'relative', overflow: 'hidden' }}>
       <div className="bg-orb" style={{ width: '400px', height: '400px', top: '-100px', right: '-100px' }} />
-      <div className="glass-panel fade-in" style={{ maxWidth: '480px', width: '100%' }}>
-        {/* Pulsing live indicator */}
-        <div style={{ marginBottom: '32px' }}>
-          <div style={{
-            width: '80px', height: '80px', borderRadius: '50%',
-            background: 'rgba(124, 58, 237, 0.15)',
-            border: '2px solid rgba(124, 58, 237, 0.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 20px',
-            animation: 'pulse 2s ease-in-out infinite',
-          }}>
-            <Users size={32} color="var(--primary-color)" />
+      <div className="bg-orb" style={{ width: '300px', height: '300px', bottom: '-60px', left: '-60px', animationDelay: '2s' }} />
+
+      <div className="glass-panel fade-in" style={{ maxWidth: '480px', width: '100%', textAlign: 'center' }}>
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ width: '76px', height: '76px', borderRadius: '50%', background: 'rgba(124,58,237,0.14)', border: '2px solid rgba(124,58,237,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px', animation: 'waiting-pulse 2s ease-in-out infinite' }}>
+            <Users size={30} color="var(--primary-color)" />
           </div>
           <h2 style={{ fontSize: '22px', marginBottom: '8px' }}>Waiting for host{dots}</h2>
-          <p className="text-muted">The organizer hasn't started the session yet.</p>
-          <p className="text-muted" style={{ fontSize: '13px', marginTop: '6px' }}>You'll automatically join when it begins.</p>
+          <p className="text-muted">The webinar hasn't started yet. You'll join automatically when it begins.</p>
         </div>
 
-        <div style={{
-          padding: '16px', borderRadius: '12px',
-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
-          marginBottom: '24px',
-        }}>
-          <p style={{ fontWeight: 600, marginBottom: '4px' }}>{session.title}</p>
-          <p className="text-muted" style={{ fontSize: '13px' }}>Hosted by {session.instructorName}</p>
-          <p className="text-muted" style={{ fontSize: '12px', marginTop: '4px' }}>
-            Joining as: <strong style={{ color: 'var(--text-main)' }}>{name}</strong>
-          </p>
+        {/* Progress steps */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '24px' }}>
+          {[{ label: 'Registered', done: true }, { label: 'Waiting', done: true }, { label: 'In Session', done: false }].map((step, i) => (
+            <React.Fragment key={step.label}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: step.done ? 'linear-gradient(135deg,var(--primary-color),var(--secondary-color))' : 'rgba(255,255,255,0.08)', border: step.done ? 'none' : '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, color: step.done ? '#fff' : 'var(--text-muted)' }}>{i + 1}</div>
+                <span style={{ fontSize: '10px', color: step.done ? 'var(--text-main)' : 'var(--text-muted)' }}>{step.label}</span>
+              </div>
+              {i < 2 && <div style={{ width: '28px', height: '1px', background: 'var(--border-color)', marginBottom: '14px' }} />}
+            </React.Fragment>
+          ))}
         </div>
 
-        <button className="btn btn-secondary" onClick={() => navigate('/')} style={{ width: '100%' }}>
-          Leave
-        </button>
+        <div style={{ padding: '14px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', marginBottom: '20px', textAlign: 'left' }}>
+          <p style={{ fontWeight: 600, marginBottom: '4px', fontSize: '14px' }}>{session?.title}</p>
+          <p className="text-muted" style={{ fontSize: '12px' }}>Hosted by {session?.instructorName}</p>
+          <p className="text-muted" style={{ fontSize: '12px', marginTop: '4px' }}>Joining as: <strong style={{ color: 'var(--text-main)' }}>{name}</strong></p>
+        </div>
+
+        <button className="btn btn-secondary" onClick={() => navigate('/')} style={{ width: '100%' }}>Leave</button>
       </div>
-
-      {joining && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div className="glass-panel flex-col flex-center" style={{ padding: '48px' }}>
-            <Loader2 size={48} color="var(--primary-color)" style={{ animation: 'spin 1s linear infinite', marginBottom: '16px' }} />
-            <p>Joining session...</p>
-          </div>
-        </div>
-      )}
 
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
-        @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.08); opacity: 0.8; } }
+        @keyframes waiting-pulse { 0%,100% { transform:scale(1); opacity:1; } 50% { transform:scale(1.07); opacity:0.85; } }
       `}</style>
     </div>
   );

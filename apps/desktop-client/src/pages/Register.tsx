@@ -1,13 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { registerForWebinar } from '../lib/api';
-import { Loader2, Calendar, Clock, Video, CheckCircle } from 'lucide-react';
+import { Loader2, Calendar, Clock, Video } from 'lucide-react';
 
 export default function Register() {
   const { id: sessionId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   
-  const [session, setSession] = useState<{title?: string; description?: string; scheduledAt?: string; status?: string; instructorName?: string} | null>(null);
+  const [session, setSession] = useState<{
+    sessionId?: string;
+    title?: string;
+    description?: string;
+    scheduledAt?: string;
+    status?: string;
+    instructorName?: string;
+    maxAttendees?: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   

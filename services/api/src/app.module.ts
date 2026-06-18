@@ -9,6 +9,7 @@ import { InvitesModule } from './invites/invites.module';
 import { JoinModule } from './join/join.module';
 import { HealthModule } from './health/health.module';
 import { RecordingModule } from './recording/recording.module';
+import { SignalModule } from './signal/signal.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RecordingModule } from './recording/recording.module';
     }),
     HealthModule,
     RecordingModule,
+    SignalModule,
   ],
 })
 export class AppModule {}

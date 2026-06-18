@@ -260,3 +260,87 @@ export interface HealthCheck {
     storage?: 'ok' | 'error';
   };
 }
+
+// ─── Participant Roles ────────────────────────────────────────────────────────
+export enum ParticipantRole {
+  HOST = 'host',
+  PRESENTER = 'presenter',
+  MODERATOR = 'moderator',
+  ATTENDEE = 'attendee',
+}
+
+// ─── Waiting Room State Machine ───────────────────────────────────────────────
+export enum WaitingRoomState {
+  REGISTERED = 'registered',
+  WAITING = 'waiting',
+  ADMITTED = 'admitted',
+  IN_SESSION = 'in_session',
+  LEFT = 'left',
+}
+
+// ─── Q&A types ────────────────────────────────────────────────────────────────
+export enum QuestionStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  ANSWERED = 'answered',
+}
+
+export interface Question {
+  id: string;
+  sessionId: string;
+  userId: string;
+  userName: string;
+  text: string;
+  status: QuestionStatus;
+  upvotes: number;
+  answer?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ─── Poll types ───────────────────────────────────────────────────────────────
+export interface Poll {
+  id: string;
+  sessionId: string;
+  question: string;
+  options: PollOption[];
+  isActive: boolean;
+  createdAt: Date;
+}
+
+export interface PollOption {
+  id: string;
+  pollId: string;
+  text: string;
+}
+
+export interface PollResult {
+  pollId: string;
+  question: string;
+  totalVotes: number;
+  options: Array<{ id: string; text: string; count: number; percentage: number }>;
+}
+
+// ─── Presence types ───────────────────────────────────────────────────────────
+export type ConnectionQuality = 'excellent' | 'good' | 'poor' | 'unknown';
+
+export interface PresenceData {
+  userId: string;
+  userName: string;
+  online: boolean;
+  roomId: string;
+  role: ParticipantRole;
+  connectionQuality: ConnectionQuality;
+  lastSeen: number;
+}
+
+// ─── Reaction types ───────────────────────────────────────────────────────────
+export type ReactionType = 'thumbs-up' | 'heart' | 'clap' | 'laugh' | 'surprised';
+
+export interface Reaction {
+  userId: string;
+  userName: string;
+  type: ReactionType;
+  timestamp: number;
+}

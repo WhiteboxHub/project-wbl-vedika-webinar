@@ -1,64 +1,49 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface UserMetadata {
-  name: string;
-  role: string;
-}
-
-export interface RoomUser {
-  userId: string;
-  metadata: UserMetadata;
-}
-
-export type SignalingMessageType =
-  | 'join'
-  | 'leave'
-  | 'offer'
-  | 'answer'
-  | 'ice-candidate'
-  | 'chat'
-  | 'hand-raise'
-  | 'user-joined'
-  | 'user-left'
-  | 'room-users'
-  | 'error';
+export type ReactionType = 'thumbs-up' | 'heart' | 'clap' | 'laugh' | 'surprised';
 
 export interface SignalingMessage {
-  type: SignalingMessageType;
-  [key: string]: unknown;
+  event: string;
+  data?: Record<string, unknown>;
 }
 
 // ─── SignalingClient ──────────────────────────────────────────────────────────
 
 export class SignalingClient {
-  private serverUrl: string;
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectDelay = 1000;
   private shouldReconnect = false;
+  private pendingJoin: (() => void) | null = null;
 
   public connected = false;
   public roomId: string | null = null;
 
-  // ── Callback properties ──────────────────────────────────────────────────
-
+  // ── Callbacks ──────────────────────────────────────────────────────────────
   public onConnected: (() => void) | null = null;
   public onDisconnected: (() => void) | null = null;
-  public onError: ((message: string) => void) | null = null;
-  public onUserJoined: ((userId: string, metadata: UserMetadata) => void) | null = null;
-  public onUserLeft: ((userId: string) => void) | null = null;
-  public onOffer: ((from: string, sdp: RTCSessionDescriptionInit) => void) | null = null;
-  public onAnswer: ((from: string, sdp: RTCSessionDescriptionInit) => void) | null = null;
-  public onIceCandidate: ((from: string, candidate: RTCIceCandidateInit) => void) | null = null;
-  public onChat: ((from: string, message: string, timestamp: number) => void) | null = null;
-  public onHandRaise: ((userId: string, raised: boolean) => void) | null = null;
-  public onRoomUsers: ((users: Array<{ userId: string; metadata: any }>) => void) | null = null;
+  public onError: ((msg: string) => void) | null = null;
+  public onRoomState: ((data: any) => void) | null = null;
+  public onParticipantJoined: ((userId: string, userName: string, role: string) => void) | null = null;
+  public onParticipantLeft: ((userId: string, userName: string) => void) | null = null;
+  public onChat: ((id: string, userId: string, userName: string, message: string, timestamp: string) => void) | null = null;
+  public onHandRaised: ((userId: string, userName: string, raised: boolean) => void) | null = null;
+  public onReaction: ((userId: string, userName: string, type: ReactionType, timestamp: number) => void) | null = null;
+  public onPollCreated: ((poll: any) => void) | null = null;
+  public onPollResult: ((result: any) => void) | null = null;
+  public onPollClosed: ((data: { pollId: string }) => void) | null = null;
+  public onQuestionPending: ((q: any) => void) | null = null;
+  public onQuestionSubmitted: ((data: { id: string; status: string }) => void) | null = null;
+  public onQuestionApproved: ((q: any) => void) | null = null;
+  public onQuestionRejected: ((data: { id: string }) => void) | null = null;
+  public onQuestionAnswered: ((q: any) => void) | null = null;
+  public onQuestionUpvoted: ((data: { id: string; upvotes: number }) => void) | null = null;
+  public onParticipantAdmitted: ((data: any) => void) | null = null;
 
-  constructor(serverUrl: string) {
-    this.serverUrl = serverUrl;
-  }
+  constructor(private readonly serverUrl: string) {}
 
-  // ── Public API ───────────────────────────────────────────────────────────
+  // ── Public API ─────────────────────────────────────────────────────────────
 
   connect(): void {
     this.shouldReconnect = true;
@@ -68,77 +53,84 @@ export class SignalingClient {
   disconnect(): void {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
+    this.clearHeartbeat();
     this.closeSocket();
   }
 
-  joinRoom(roomId: string, userId: string, metadata: UserMetadata): void {
+  joinRoom(roomId: string, token: string, userName: string, role: string): void {
     this.roomId = roomId;
-    this.send({ type: 'join', roomId, userId, metadata });
+    const doJoin = () => this.send({ event: 'join-room', data: { roomId, token, userName, role } });
+    if (this.connected) doJoin();
+    else this.pendingJoin = doJoin;
   }
 
-  leaveRoom(): void {
-    this.send({ type: 'leave' });
-    this.roomId = null;
-  }
+  leaveRoom(): void { this.send({ event: 'leave-room' }); this.roomId = null; }
+  sendChat(message: string): void { this.send({ event: 'chat', data: { message } }); }
+  raiseHand(): void { this.send({ event: 'raise-hand' }); }
+  lowerHand(): void { this.send({ event: 'lower-hand' }); }
+  sendReaction(type: ReactionType): void { this.send({ event: 'reaction', data: { type } }); }
+  createPoll(question: string, options: string[]): void { this.send({ event: 'poll-create', data: { question, options } }); }
+  votePoll(pollId: string, optionId: string): void { this.send({ event: 'poll-vote', data: { pollId, optionId } }); }
+  closePoll(pollId: string): void { this.send({ event: 'poll-close', data: { pollId } }); }
+  submitQuestion(text: string): void { this.send({ event: 'question-submit', data: { text } }); }
+  approveQuestion(questionId: string): void { this.send({ event: 'question-approve', data: { questionId } }); }
+  rejectQuestion(questionId: string): void { this.send({ event: 'question-reject', data: { questionId } }); }
+  answerQuestion(questionId: string, answer: string): void { this.send({ event: 'question-answer', data: { questionId, answer } }); }
+  upvoteQuestion(questionId: string): void { this.send({ event: 'question-upvote', data: { questionId } }); }
+  admitParticipant(userId: string): void { this.send({ event: 'admit-participant', data: { userId } }); }
 
-  sendOffer(to: string, sdp: RTCSessionDescriptionInit): void {
-    this.send({ type: 'offer', to, sdp });
-  }
-
-  sendAnswer(to: string, sdp: RTCSessionDescriptionInit): void {
-    this.send({ type: 'answer', to, sdp });
-  }
-
-  sendIceCandidate(to: string, candidate: RTCIceCandidateInit): void {
-    this.send({ type: 'ice-candidate', to, candidate });
-  }
-
-  sendChat(message: string): void {
-    this.send({ type: 'chat', message });
-  }
-
-  sendHandRaise(raised: boolean): void {
-    this.send({ type: 'hand-raise', raised });
-  }
-
-  // ── Private helpers ──────────────────────────────────────────────────────
+  // ── Private ────────────────────────────────────────────────────────────────
 
   private send(msg: SignalingMessage): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.log('[Signal] Cannot send — WebSocket not open');
-      return;
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
     }
-    console.log('[Signal] Sending:', msg.type);
-    this.ws.send(JSON.stringify(msg));
   }
 
   private openSocket(): void {
     this.closeSocket();
-
-    console.log('[Signal] Connecting to', this.serverUrl);
     const ws = new WebSocket(this.serverUrl);
 
     ws.onopen = () => {
-      console.log('[Signal] Connected');
       this.connected = true;
-      this.reconnectDelay = 1000; // reset backoff on success
+      this.reconnectDelay = 1000;
+      this.startHeartbeat();
       this.onConnected?.();
+      if (this.pendingJoin) { this.pendingJoin(); this.pendingJoin = null; }
     };
 
-    ws.onclose = (ev: CloseEvent) => {
-      console.log('[Signal] Disconnected — code:', ev.code, 'reason:', ev.reason);
+    ws.onclose = () => {
       this.connected = false;
+      this.clearHeartbeat();
       this.onDisconnected?.();
       this.scheduleReconnect();
     };
 
-    ws.onerror = (ev: Event) => {
-      console.log('[Signal] WebSocket error', ev);
-      this.onError?.('WebSocket connection error');
-    };
+    ws.onerror = () => { this.onError?.('WebSocket connection error'); };
 
     ws.onmessage = (ev: MessageEvent) => {
-      this.handleMessage(ev);
+      let msg: { event: string; data?: any };
+      try { msg = JSON.parse(ev.data as string); } catch { return; }
+      const d = msg.data;
+      switch (msg.event) {
+        case 'room-state': this.onRoomState?.(d); break;
+        case 'participant-joined': this.onParticipantJoined?.(d.userId, d.userName, d.role); break;
+        case 'participant-left': this.onParticipantLeft?.(d.userId, d.userName); break;
+        case 'chat': this.onChat?.(d.id, d.userId, d.userName, d.message, d.timestamp); break;
+        case 'hand-raised': this.onHandRaised?.(d.userId, d.userName, d.raised); break;
+        case 'reaction': this.onReaction?.(d.userId, d.userName, d.type, d.timestamp); break;
+        case 'poll-created': this.onPollCreated?.(d); break;
+        case 'poll-result': this.onPollResult?.(d); break;
+        case 'poll-closed': this.onPollClosed?.(d); break;
+        case 'question-pending': this.onQuestionPending?.(d); break;
+        case 'question-submitted': this.onQuestionSubmitted?.(d); break;
+        case 'question-approved': this.onQuestionApproved?.(d); break;
+        case 'question-rejected': this.onQuestionRejected?.(d); break;
+        case 'question-answered': this.onQuestionAnswered?.(d); break;
+        case 'question-upvoted': this.onQuestionUpvoted?.(d); break;
+        case 'participant-admitted': this.onParticipantAdmitted?.(d); break;
+        case 'error': this.onError?.(d?.message ?? 'Unknown server error'); break;
+      }
     };
 
     this.ws = ws;
@@ -146,18 +138,8 @@ export class SignalingClient {
 
   private closeSocket(): void {
     if (this.ws) {
-      // Remove handlers so close doesn't trigger reconnect
-      this.ws.onopen = null;
-      this.ws.onclose = null;
-      this.ws.onerror = null;
-      this.ws.onmessage = null;
-
-      if (
-        this.ws.readyState === WebSocket.OPEN ||
-        this.ws.readyState === WebSocket.CONNECTING
-      ) {
-        this.ws.close();
-      }
+      this.ws.onopen = this.ws.onclose = this.ws.onerror = this.ws.onmessage = null;
+      if (this.ws.readyState < 2) this.ws.close();
       this.ws = null;
       this.connected = false;
     }
@@ -165,76 +147,21 @@ export class SignalingClient {
 
   private scheduleReconnect(): void {
     if (!this.shouldReconnect) return;
-
     this.clearReconnectTimer();
-    console.log('[Signal] Reconnecting in', this.reconnectDelay, 'ms');
-
-    this.reconnectTimer = setTimeout(() => {
-      this.openSocket();
-    }, this.reconnectDelay);
-
-    // Exponential backoff capped at 10 s
+    this.reconnectTimer = setTimeout(() => this.openSocket(), this.reconnectDelay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
   }
 
   private clearReconnectTimer(): void {
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    if (this.reconnectTimer !== null) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
   }
 
-  private handleMessage(ev: MessageEvent): void {
-    let msg: SignalingMessage;
-    try {
-      msg = JSON.parse(ev.data as string);
-    } catch {
-      console.log('[Signal] Failed to parse message:', ev.data);
-      return;
-    }
+  private startHeartbeat(): void {
+    this.clearHeartbeat();
+    this.heartbeatTimer = setInterval(() => this.send({ event: 'heartbeat' }), 20000);
+  }
 
-    console.log('[Signal] Received:', msg.type);
-
-    switch (msg.type) {
-      case 'user-joined':
-        this.onUserJoined?.(msg.userId as string, msg.metadata as UserMetadata);
-        break;
-
-      case 'user-left':
-        this.onUserLeft?.(msg.userId as string);
-        break;
-
-      case 'offer':
-        this.onOffer?.(msg.from as string, msg.sdp as RTCSessionDescriptionInit);
-        break;
-
-      case 'answer':
-        this.onAnswer?.(msg.from as string, msg.sdp as RTCSessionDescriptionInit);
-        break;
-
-      case 'ice-candidate':
-        this.onIceCandidate?.(msg.from as string, msg.candidate as RTCIceCandidateInit);
-        break;
-
-      case 'chat':
-        this.onChat?.(msg.from as string, msg.message as string, msg.timestamp as number);
-        break;
-
-      case 'hand-raise':
-        this.onHandRaise?.(msg.userId as string, msg.raised as boolean);
-        break;
-
-      case 'room-users':
-        this.onRoomUsers?.(msg.users as Array<{ userId: string; metadata: any }>);
-        break;
-
-      case 'error':
-        console.log('[Signal] Server error:', msg.message);
-        this.onError?.(msg.message as string);
-        break;
-
-      default:
-        console.log('[Signal] Unknown message type:', msg.type);
-    }
+  private clearHeartbeat(): void {
+    if (this.heartbeatTimer !== null) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
   }
 }
