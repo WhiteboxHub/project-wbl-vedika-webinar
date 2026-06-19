@@ -22,7 +22,6 @@ export class SessionsService {
     instructorId: string,
     data: CreateSessionRequest,
   ): Promise<SessionEntity> {
-    const liveKitRoomName = this.generateRoomName();
     const inviteToken = this.generateInviteToken();
 
     const session = this.sessionRepository.create({
@@ -31,12 +30,14 @@ export class SessionsService {
       instructorId,
       status: SessionStatus.SCHEDULED,
       scheduledAt: data.scheduledAt,
-      liveKitRoomName,
+      liveKitRoomName: 'pending',
       inviteToken,
       maxAttendees: data.maxAttendees || 100,
     });
 
-    return await this.sessionRepository.save(session);
+    const saved = await this.sessionRepository.save(session);
+    saved.liveKitRoomName = saved.id;
+    return await this.sessionRepository.save(saved);
   }
 
   async getSession(sessionId: string): Promise<SessionEntity> {
@@ -108,25 +109,22 @@ export class SessionsService {
     // ── Tear down LiveKit room ─────────────────────────────────────────────
     // Deleting the room disconnects all participants from the media server.
     // This is best-effort: if LiveKit is unreachable we log and continue.
+    const roomId = session.id;
     try {
       const roomClient = this.tokenService.getRoomServiceClient();
-      await roomClient.deleteRoom(session.liveKitRoomName);
-      this.logger.log(`[${session.liveKitRoomName}] LiveKit room deleted`);
+      await roomClient.deleteRoom(roomId);
+      this.logger.log(`[${roomId}] LiveKit room deleted`);
     } catch (err: any) {
-      // "Not found" is fine — room may already be empty
       if (!err?.message?.includes('not found')) {
-        this.logger.warn(`[${session.liveKitRoomName}] deleteRoom failed: ${err.message}`);
+        this.logger.warn(`[${roomId}] deleteRoom failed: ${err.message}`);
       }
     }
 
-    // ── Notify all connected signal clients ───────────────────────────────
-    // Clients listen for 'session-ended' and show a "Session has ended" screen
-    // instead of being silently dropped.
-    this.signalService.broadcast(session.liveKitRoomName, 'session-ended', {
+    this.signalService.broadcast(roomId, 'session-ended', {
       sessionId,
       endedAt: saved.endedAt,
     });
-    this.logger.log(`[${session.liveKitRoomName}] session-ended broadcast sent`);
+    this.logger.log(`[${roomId}] session-ended broadcast sent`);
 
     return saved;
   }

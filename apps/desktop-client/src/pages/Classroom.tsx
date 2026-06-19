@@ -3,7 +3,6 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   LiveKitRoom,
   RoomAudioRenderer,
-  GridLayout,
   ParticipantTile,
   ControlBar,
   useParticipants,
@@ -12,7 +11,7 @@ import {
   useConnectionState,
   useRoomContext,
 } from '@livekit/components-react';
-import { ConnectionState, Track, ConnectionQuality, DisconnectReason } from 'livekit-client';
+import { ConnectionState, Track, ConnectionQuality, DisconnectReason, RoomEvent } from 'livekit-client';
 import '@livekit/components-styles';
 import {
   Loader2, MicOff, UserX, Square, Users,
@@ -20,12 +19,15 @@ import {
   BarChart2, HelpCircle, RotateCcw, CheckCircle,
 } from 'lucide-react';
 import { removeParticipant, muteParticipant } from '../lib/api';
-import { loadClassroomSession, clearClassroomSession, getLiveKitUrl, getSignalServerUrl } from '../lib/classroom-session';
+import { loadWebinarSession, loadClassroomSession, clearClassroomSession, getLiveKitUrl, getSignalServerUrl, type WebinarSessionData } from '../lib/classroom-session';
+import NativeClassroomView from './NativeClassroomView';
 import { SignalingClient, ReactionType } from '../lib/signaling';
-import { startScreenShare, stopScreenShare } from '../lib/screen-share';
+import { startScreenShare, stopScreenShare, isScreenSharing } from '../lib/screen-share';
 import PollPanel, { PollData, PollResult } from './classroom/PollPanel';
 import QAPanel, { QuestionData } from './classroom/QAPanel';
 import ReactionBar from './classroom/ReactionBar';
+
+const USE_NATIVE_WEBRTC = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_USE_NATIVE_WEBRTC === 'true';
 
 type SideTab = 'chat' | 'participants' | 'polls' | 'qa';
 type Role = 'host' | 'presenter' | 'moderator' | 'attendee';
@@ -70,7 +72,7 @@ function ParticipantList({ isHost, sessionId, raisedHands }: { isHost: boolean; 
                   {p.isLocal && <span style={{ fontSize: '10px', background: 'rgba(124,58,237,0.2)', color: 'var(--primary-color)', padding: '1px 5px', borderRadius: '8px' }}>You</span>}
                 </div>
                 <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>
-                  {p.isMicrophoneEnabled ? '🎙' : '🔇'}{p.isCameraEnabled ? ' 📹' : ''}
+                  {p.isMicrophoneEnabled ? '🎙 Mic on' : '🔇 Muted'}
                   {(p as any).connectionQuality !== ConnectionQuality.Unknown
                     ? <span style={{ color: qualityColor((p as any).connectionQuality) }}> · {qualityLabel((p as any).connectionQuality)}</span>
                     : null}
@@ -131,16 +133,12 @@ function ChatPanel({ messages, onSend }: { messages: any[]; onSend: (m: string) 
   );
 }
 
-// ─── Stage ────────────────────────────────────────────────────────────────────
+// ─── Stage (webinar: screen share only — profiles live in People sidebar) ───
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function Stage({ isHost, isPresenter, onLeave, sessionId: _sid, raisedHands: _rh }: { isHost: boolean; isPresenter: boolean; onLeave: () => void; sessionId: string; raisedHands: Set<string> }) {
-  const tracks = useTracks(
-    [
-      { source: Track.Source.Camera, withPlaceholder: true },
-      { source: Track.Source.ScreenShare, withPlaceholder: false },
-    ],
-    { onlySubscribed: false },
+  const screenTracks = useTracks(
+    [{ source: Track.Source.ScreenShare, withPlaceholder: false }],
+    { onlySubscribed: true },
   );
   const { localParticipant } = useLocalParticipant();
   const connectionState = useConnectionState();
@@ -151,6 +149,22 @@ function Stage({ isHost, isPresenter, onLeave, sessionId: _sid, raisedHands: _rh
   const connecting = connectionState === ConnectionState.Connecting || connectionState === ConnectionState.Reconnecting;
   const connected = connectionState === ConnectionState.Connected;
   const canShare = isHost || isPresenter;
+
+  // Prefer remote (host) screen share; fall back to local preview while presenting
+  const activeScreenShare =
+    screenTracks.find(t => !t.participant.isLocal) ?? screenTracks[0] ?? null;
+
+  useEffect(() => {
+    if (!room) return;
+    const sync = () => setSharing(isScreenSharing(room));
+    sync();
+    room.on(RoomEvent.LocalTrackPublished, sync);
+    room.on(RoomEvent.LocalTrackUnpublished, sync);
+    return () => {
+      room.off(RoomEvent.LocalTrackPublished, sync);
+      room.off(RoomEvent.LocalTrackUnpublished, sync);
+    };
+  }, [room]);
 
   const toggleHand = () => {
     try {
@@ -176,17 +190,30 @@ function Stage({ isHost, isPresenter, onLeave, sessionId: _sid, raisedHands: _rh
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {connected && tracks.length > 0 ? (
-          <GridLayout tracks={tracks} style={{ width: '100%', height: '100%' }}>
-            <ParticipantTile />
-          </GridLayout>
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-            <div style={{ width: '72px', height: '72px', borderRadius: '50%', background: 'rgba(124,58,237,0.1)', border: '2px solid rgba(124,58,237,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Users size={32} color="var(--primary-color)" />
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+        {connected && activeScreenShare ? (
+          <div className="screen-share-stage">
+            <ParticipantTile trackRef={activeScreenShare} />
+            <div className="screen-share-label">
+              <Monitor size={13} />
+              <span>{activeScreenShare.participant.name || activeScreenShare.participant.identity}</span>
             </div>
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>{connected ? 'No cameras yet' : 'Joining…'}</p>
+          </div>
+        ) : (
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '24px', textAlign: 'center' }}>
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(124,58,237,0.1)', border: '2px solid rgba(124,58,237,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {canShare ? <Monitor size={34} color="var(--primary-color)" /> : <Users size={34} color="var(--primary-color)" />}
+            </div>
+            <p style={{ color: 'var(--text-main)', fontSize: '16px', fontWeight: 600 }}>
+              {!connected ? 'Joining session…' : canShare ? 'Ready to present' : 'Waiting for presentation'}
+            </p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', maxWidth: '340px', lineHeight: 1.5 }}>
+              {!connected
+                ? 'Setting up your connection to the webinar room.'
+                : canShare
+                  ? 'Click "Share Screen" below to start. Attendees see your screen here — names appear in the People panel.'
+                  : 'The host has not started screen sharing yet. Use the sidebar to chat or raise your hand.'}
+            </p>
           </div>
         )}
       </div>
@@ -207,7 +234,7 @@ function Stage({ isHost, isPresenter, onLeave, sessionId: _sid, raisedHands: _rh
         <div className="lk-ctrl-wrap">
           <ControlBar
             variation="minimal"
-            controls={{ microphone: true, camera: isHost || isPresenter, screenShare: false, leave: false }}
+            controls={{ microphone: isHost || isPresenter, camera: false, screenShare: false, leave: false }}
           />
         </div>
 
@@ -255,6 +282,19 @@ export default function Classroom() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const nativeSession = USE_NATIVE_WEBRTC
+    ? ((location.state as WebinarSessionData) || (roomId ? loadWebinarSession(roomId) : null))
+    : null;
+
+  if (USE_NATIVE_WEBRTC && nativeSession?.grant) {
+    return (
+      <NativeClassroomView
+        grant={nativeSession.grant}
+        isHost={nativeSession.isHost}
+      />
+    );
+  }
+
   const sessionData = useMemo(
     () => (location.state as any) || (roomId ? loadClassroomSession(roomId) : null),
     [roomId],
@@ -275,7 +315,7 @@ export default function Classroom() {
    */
   const signalToken: string = sessionData?.signalToken || liveKitToken;
 
-  const [activeTab, setActiveTab] = useState<SideTab>('chat');
+  const [activeTab, setActiveTab] = useState<SideTab>(isHost ? 'chat' : 'participants');
   const [error, setError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null); // non-fatal, shown as toast
 
@@ -455,9 +495,11 @@ export default function Classroom() {
         audio={false}
         connect={true}
         data-lk-theme="default"
+        connectOptions={{ autoSubscribe: true }}
         options={{
           adaptiveStream: true,
           dynacast: true,
+          disconnectOnPageLeave: false,
           publishDefaults: {
             simulcast: true,
           },
@@ -630,8 +672,44 @@ export default function Classroom() {
         }
         .ctrl-btn-danger:hover { background: rgba(239,68,68,0.25) !important; }
 
-        /* ── Video grid ──────────────────────────────────────────────── */
-        .lk-grid-layout { background: transparent !important; }
+        /* ── Screen share stage (full-width, no camera grid) ─────────── */
+        .screen-share-stage {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #000;
+        }
+        .screen-share-stage .lk-participant-tile {
+          width: 100% !important;
+          height: 100% !important;
+          max-width: 100% !important;
+          max-height: 100% !important;
+          border-radius: 0 !important;
+        }
+        .screen-share-stage video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: contain !important;
+        }
+        .screen-share-label {
+          position: absolute;
+          bottom: 12px;
+          left: 12px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          border-radius: 8px;
+          background: rgba(0,0,0,0.65);
+          border: 1px solid rgba(255,255,255,0.12);
+          color: #f8fafc;
+          font-size: 12px;
+          font-weight: 600;
+          pointer-events: none;
+        }
         .lk-participant-tile { border-radius: 12px !important; overflow: hidden !important; }
         .lk-participant-placeholder { background: rgba(124,58,237,0.15) !important; }
       `}</style>

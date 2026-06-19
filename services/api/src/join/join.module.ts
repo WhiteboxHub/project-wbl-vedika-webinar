@@ -10,13 +10,14 @@ import { SessionEntity } from '../database/entities/session.entity';
 import { InvitesModule } from '../invites/invites.module';
 import { LiveKitModule } from '../livekit/livekit.module';
 
+import { IceService } from './ice.service';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([UserEntity, AttendanceEntity, SessionEntity]),
     InvitesModule,
     LiveKitModule,
     ConfigModule,
-    // JwtModule is needed so JoinService can issue signal tokens (app JWT_SECRET)
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (cs: ConfigService) => ({
@@ -27,7 +28,7 @@ import { LiveKitModule } from '../livekit/livekit.module';
     }),
   ],
   controllers: [JoinController],
-  providers: [JoinService],
-  exports: [JoinService],
+  providers: [JoinService, IceService],
+  exports: [JoinService, IceService],
 })
 export class JoinModule {}

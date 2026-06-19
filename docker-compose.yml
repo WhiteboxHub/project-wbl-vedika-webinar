@@ -38,6 +38,8 @@ services:
     ports:
       - "7880:7880"          # HTTP / WebSocket signaling
       - "7881:7881"          # TCP WebRTC fallback
+      - "3479:3479/udp"      # LiveKit embedded TURN (UDP)
+      - "3479:3479/tcp"      # LiveKit embedded TURN (TCP)
       - "50000-50020:50000-50020/udp"  # UDP media (21 ports, matches livekit.yaml)
     volumes:
       - ./docker/livekit.yaml:/etc/livekit.yaml
@@ -61,6 +63,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: webinar-coturn
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    command: >
+      -n
+      --log-file=stdout
+      --listening-port=3478
+      --fingerprint
+      --lt-cred-mech
+      --use-auth-secret
+      --static-auth-secret=webinar-turn-secret-change-me
+      --realm=webinar.local
+      --total-quota=100
+      --stale-nonce
+      --no-cli
 
 volumes:
   postgres_data:

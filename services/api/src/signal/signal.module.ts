@@ -9,6 +9,7 @@ import { ChatService } from './chat.service';
 import { PollService } from './poll.service';
 import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
+import { GraceService } from './grace.service';
 import { ChatMessageEntity } from '../database/entities/chat-message.entity';
 import { PollEntity } from '../database/entities/poll.entity';
 import { PollOptionEntity } from '../database/entities/poll-option.entity';
@@ -41,7 +42,8 @@ import { QuestionEntity } from '../database/entities/question.entity';
     PollService,
     QAService,
     ReactionService,
+    GraceService,
   ],
-  exports: [SignalGateway, SignalService, PresenceService, ChatService, PollService, QAService],
+  exports: [SignalGateway, SignalService, PresenceService, ChatService, PollService, QAService, GraceService],
 })
 export class SignalModule {}

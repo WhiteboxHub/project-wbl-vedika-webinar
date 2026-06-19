@@ -1,14 +1,20 @@
-import { Controller, Post, Body, UseGuards, Param } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Param, Get } from '@nestjs/common';
 import { JoinService } from './join.service';
 import { JoinRequestDto } from './dto/join-request.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '@webinar/shared';
-import { IsString } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 
 class HostTokenDto {
   @IsString()
   sessionId: string;
+}
+
+class DiagnosticsDto {
+  @IsOptional()
+  @IsString()
+  participantId?: string;
 }
 
 @Controller('join')
@@ -18,24 +24,32 @@ export class JoinController {
   @Post('token')
   async requestJoinToken(@Body() dto: JoinRequestDto) {
     return await this.joinService.requestJoin(dto.inviteToken, dto.userName);
-    // Response now includes: livekitToken, signalToken, livekitUrl, roomName, sessionId
   }
 
   @Post('host-token')
   @UseGuards(JwtAuthGuard)
   async requestHostToken(@Body() dto: HostTokenDto, @CurrentUser() user: AuthUser) {
-    const { token, signalToken, roomName } = await this.joinService.issueInstructorToken(
+    const { grant } = await this.joinService.issueInstructorToken(
       dto.sessionId,
       user.id,
       user.name,
     );
     return {
-      livekitToken: token,
-      signalToken,
-      livekitUrl: '', // Client uses Vite proxy
-      roomName,
-      sessionId: dto.sessionId,
+      ...grant,
+      livekitToken: grant.livekitToken ?? '',
+      roomName: grant.roomId,
     };
+  }
+
+  @Get('ice-servers')
+  getPublicIceServers() {
+    return this.joinService.getDiagnosticIceServers();
+  }
+
+  @Post('diagnostics/ice-servers')
+  getIceServers(@Body() dto: DiagnosticsDto) {
+    const participantId = dto.participantId ?? 'diagnostic';
+    return this.joinService.getIceServersForParticipant(participantId);
   }
 
   @Post('register/:sessionId')

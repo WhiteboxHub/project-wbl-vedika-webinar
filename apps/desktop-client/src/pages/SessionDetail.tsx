@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getSession, generateInviteLink, startSession, endSession, getStoredAuth, Session, getHostToken } from '../lib/api';
-import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
+import { saveClassroomSession, saveWebinarSession, getLiveKitUrl } from '../lib/classroom-session';
+
+const USE_NATIVE_WEBRTC = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_USE_NATIVE_WEBRTC === 'true';
 import { ArrowLeft, Copy, Check, Square, Users, Clock, Radio, Video, Globe, AlertTriangle, Loader2 } from 'lucide-react';
 
 // Persist tunnel URL across sessions
@@ -100,17 +102,30 @@ export default function SessionDetail() {
       }
       // Get a host LiveKit + signal token
       const data = await getHostToken(id);
-      const roomName = data.roomName;
-      const classroomData = {
-        participantName: auth?.user?.name || 'Host',
-        isHost: true,
-        sessionId: id,
-        liveKitToken: data.livekitToken,
-        signalToken: data.signalToken,
-        livekitUrl: getLiveKitUrl(),
-      };
-      saveClassroomSession(roomName, classroomData);
-      navigate(`/class/${roomName}`, { state: classroomData });
+      const roomId = data.roomId || data.roomName;
+
+      if (USE_NATIVE_WEBRTC && data.participantId) {
+        const webinarData = {
+          roomId: roomId!,
+          participantId: data.participantId,
+          isHost: true,
+          sessionId: id,
+          grant: data,
+        };
+        saveWebinarSession(roomId!, webinarData);
+        navigate(`/class/${roomId}`, { state: webinarData });
+      } else {
+        const classroomData = {
+          participantName: auth?.user?.name || 'Host',
+          isHost: true,
+          sessionId: id,
+          liveKitToken: data.livekitToken!,
+          signalToken: data.signalToken,
+          livekitUrl: getLiveKitUrl(),
+        };
+        saveClassroomSession(roomId!, classroomData);
+        navigate(`/class/${roomId}`, { state: classroomData });
+      }
     } catch (err: any) {
       alert(`Failed to join: ${err.message}`);
     } finally {

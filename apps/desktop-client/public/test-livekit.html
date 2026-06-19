@@ -83,8 +83,9 @@
     window.testStep3 = async function() {
       if (!livekitToken) { log('⚠️ Get host token first!', 'warn'); return; }
       log('--- Step 3: Connecting to LiveKit ---');
-      const serverUrl = 'ws://localhost:7880';
-      log('Server URL: ' + serverUrl);
+      const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const serverUrl = `${wsProto}//${location.hostname}:${location.port || '5173'}/livekit`;
+      log('Server URL: ' + serverUrl + ' (via Vite proxy — required for ICE on Windows Docker)');
       log('Token (first 50 chars): ' + livekitToken.substring(0, 50) + '...');
       log('Room: ' + roomName);
 
@@ -123,11 +124,13 @@
     };
 
     window.testStep4 = async function() {
-      log('--- Step 4: Testing WebSocket Direct ---');
+      log('--- Step 4: Testing WebSocket via /livekit proxy ---');
       try {
-        const ws = new WebSocket('ws://localhost:7880');
-        ws.onopen = () => { log('✅ WebSocket opened to ws://localhost:7880', 'ok'); ws.close(); };
-        ws.onerror = (e) => { log('❌ WebSocket error to ws://localhost:7880', 'err'); };
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const url = `${wsProto}//${location.hostname}:${location.port || '5173'}/livekit`;
+        const ws = new WebSocket(url);
+        ws.onopen = () => { log('✅ WebSocket opened to ' + url, 'ok'); ws.close(); };
+        ws.onerror = () => { log('❌ WebSocket error to ' + url, 'err'); };
         ws.onclose = (e) => { log('WebSocket closed: code=' + e.code + ' reason=' + e.reason); };
       } catch (e) {
         log('❌ WebSocket creation failed: ' + e.message, 'err');

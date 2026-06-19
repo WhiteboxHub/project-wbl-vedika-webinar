@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Room, RoomEvent, ConnectionState } from 'livekit-client';
+import { getLiveKitUrl } from '../lib/classroom-session';
 
 /**
  * Standalone LiveKit connection test page.
@@ -74,11 +75,11 @@ export default function TestLiveKit() {
     }
   }
 
-  // Step 3: Test WebSocket
+  // Step 3: Test WebSocket (via Vite /livekit proxy — required for ICE on Windows Docker)
   async function testWebSocket() {
     log('--- Step 3: Test WebSocket to LiveKit ---');
-    const url = 'ws://localhost:7880';
-    log(`Connecting WebSocket to ${url}...`);
+    const url = getLiveKitUrl();
+    log(`Connecting WebSocket to ${url} (proxied via Vite)...`);
     const ws = new WebSocket(url);
     ws.onopen = () => { log('✅ WebSocket OPEN to ' + url, 'ok'); ws.close(); setStep(3); };
     ws.onerror = () => { log('❌ WebSocket ERROR to ' + url, 'err'); };
@@ -88,7 +89,7 @@ export default function TestLiveKit() {
   // Step 4: Connect Room
   async function connectRoom() {
     log('--- Step 4: Connect to LiveKit Room ---');
-    const serverUrl = 'ws://localhost:7880';
+    const serverUrl = getLiveKitUrl();
     log(`Server: ${serverUrl}`);
     log(`Room: ${roomName}`);
     log(`Token length: ${lkToken.length}`);

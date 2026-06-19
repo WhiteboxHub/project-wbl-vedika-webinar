@@ -8,6 +8,7 @@ import { ChatService } from './chat.service';
 import { PollService } from './poll.service';
 import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
+import { GraceService } from './grace.service';
 import { ParticipantRole } from '@webinar/shared';
 
 interface Msg {
@@ -15,8 +16,7 @@ interface Msg {
   data?: Record<string, unknown>;
 }
 
-// WeakMap: ws → userId (survives disconnect)
-const wsUser = new WeakMap<WebSocket, string>();
+const wsParticipant = new WeakMap<WebSocket, string>();
 
 @WebSocketGateway({ path: '/signal' })
 export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
@@ -31,6 +31,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly poll: PollService,
     private readonly qa: QAService,
     private readonly reaction: ReactionService,
+    private readonly grace: GraceService,
   ) {}
 
   afterInit() {
@@ -43,8 +44,8 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       try { msg = JSON.parse(raw.toString()) as Msg; }
       catch { this.signal.sendDirect(ws, 'error', { message: 'Invalid JSON' }); return; }
 
-      const userId = wsUser.get(ws);
-      try { await this.route(ws, msg, userId); }
+      const participantId = wsParticipant.get(ws);
+      try { await this.route(ws, msg, participantId); }
       catch (err: any) {
         this.logger.error(`[${msg.event}] ${err.message}`);
         this.signal.sendDirect(ws, 'error', { message: err.message || 'Internal error' });
@@ -52,40 +53,72 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     });
   }
 
-  handleDisconnect(ws: WebSocket) {
-    const userId = wsUser.get(ws);
-    if (!userId) return;
-    const client = this.signal.removeClient(userId);
-    if (client) {
-      this.presence.removePresence(userId, client.roomId).catch(() => {});
-      this.signal.broadcast(client.roomId, 'participant-left', { userId, userName: client.userName });
-    }
+  async handleDisconnect(ws: WebSocket) {
+    const participantId = wsParticipant.get(ws);
+    if (!participantId) return;
+    const client = this.signal.getClient(participantId);
+    if (!client) return;
+
+    await this.grace.enterGrace(participantId, client.roomId);
+    this.signal.removeClient(participantId);
+    await this.presence.removePresence(participantId, client.roomId);
+
+    setTimeout(async () => {
+      const stillInGrace = await this.grace.isInGrace(participantId);
+      if (stillInGrace) {
+        this.signal.broadcast(client.roomId, 'participant-left', {
+          userId: participantId,
+          userName: client.userName,
+        });
+      }
+    }, 60_000);
   }
 
-  private async route(ws: WebSocket, msg: Msg, userId?: string) {
+  private pid(participantId?: string): string | undefined {
+    return participantId;
+  }
+
+  private async route(ws: WebSocket, msg: Msg, participantId?: string) {
     const d = msg.data ?? {};
 
     switch (msg.event) {
 
-      // ── Auth & Room join ────────────────────────────────────────────────────
       case 'join-room': {
         const token = d.token as string;
         const roomId = d.roomId as string;
-        if (!token || !roomId) { this.signal.sendDirect(ws, 'error', { message: 'token and roomId required' }); return; }
+        if (!token || !roomId) {
+          this.signal.sendDirect(ws, 'error', { message: 'token and roomId required' });
+          return;
+        }
 
         const payload = this.signal.validateToken(token);
-        if (!payload) { this.signal.sendDirect(ws, 'error', { message: 'Invalid or expired token' }); return; }
+        if (!payload) {
+          this.signal.sendDirect(ws, 'error', { message: 'Invalid or expired token' });
+          return;
+        }
 
-        const uid = payload.sub;
-        const userName = (d.userName as string) || payload.email?.split('@')[0] || uid;
-        const role = (d.role as string) || 'attendee';
+        const userName = (d.userName as string) || payload.displayName || payload.sub;
+        const role = (d.role as string) || payload.role || 'attendee';
 
-        wsUser.set(ws, uid);
-        this.signal.addClient({ ws, userId: uid, userName, roomId, role });
+        await this.grace.clearGraceIfPresent(payload.sub);
 
-        await this.presence.setPresence(uid, {
-          userName, online: true, roomId, role: role as ParticipantRole,
-          connectionQuality: 'excellent', lastSeen: Date.now(),
+        let client;
+        try {
+          client = this.signal.registerClient(ws, payload, roomId, userName, role);
+        } catch (err: any) {
+          this.signal.sendDirect(ws, 'error', { message: err.message });
+          return;
+        }
+
+        wsParticipant.set(ws, payload.sub);
+
+        await this.presence.setPresence(payload.sub, {
+          userName,
+          online: true,
+          roomId,
+          role: role as ParticipantRole,
+          connectionQuality: 'excellent',
+          lastSeen: Date.now(),
         });
 
         const [history, presenceList, activePoll] = await Promise.all([
@@ -94,76 +127,111 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
           this.poll.getActivePoll(roomId),
         ]);
 
-        this.signal.sendDirect(ws, 'room-state', { history, presence: presenceList, activePoll });
-        this.signal.broadcast(roomId, 'participant-joined', { userId: uid, userName, role }, uid);
+        this.signal.sendDirect(ws, 'room-state', {
+          history,
+          presence: presenceList,
+          activePoll,
+          connectionEpoch: client.connectionEpoch,
+        });
+        this.signal.broadcast(roomId, 'participant-joined', {
+          userId: payload.sub,
+          userName,
+          role,
+        }, payload.sub);
         break;
       }
 
       case 'leave-room': {
-        if (!userId) return;
-        const client = this.signal.removeClient(userId);
+        if (!participantId) return;
+        const client = this.signal.removeClient(participantId);
         if (client) {
-          await this.presence.removePresence(userId, client.roomId);
-          this.signal.broadcast(client.roomId, 'participant-left', { userId, userName: client.userName });
+          await this.presence.removePresence(participantId, client.roomId);
+          this.signal.broadcast(client.roomId, 'participant-left', {
+            userId: participantId,
+            userName: client.userName,
+          });
         }
         break;
       }
 
-      case 'heartbeat': {
-        if (userId) await this.presence.heartbeat(userId);
+      case 'ping': {
+        this.signal.sendDirect(ws, 'pong', {
+          ts: d.ts,
+          serverTs: Date.now(),
+        });
+        if (participantId) await this.presence.heartbeat(participantId);
         break;
       }
 
-      // ── Chat ────────────────────────────────────────────────────────────────
+      case 'heartbeat': {
+        if (participantId) await this.presence.heartbeat(participantId);
+        break;
+      }
+
+      // ── WebRTC signaling relay ─────────────────────────────────────────────
+      case 'webrtc-offer':
+      case 'webrtc-answer':
+      case 'webrtc-ice':
+      case 'webrtc-restart': {
+        if (!participantId) return;
+        const targetId = d.targetParticipantId as string;
+        if (!targetId) return;
+        this.signal.relayWebRtc(participantId, targetId, msg.event, d);
+        break;
+      }
+
       case 'chat': {
-        if (!userId) return;
-        const client = this.signal.getClient(userId);
+        if (!participantId) return;
+        const client = this.signal.getClient(participantId);
         if (!client) return;
         const message = ((d.message as string) || '').trim();
         if (!message) return;
-        const saved = await this.chat.save(client.roomId, userId, client.userName, message);
+        const saved = await this.chat.save(client.roomId, participantId, client.userName, message);
         this.signal.broadcast(client.roomId, 'chat', {
-          id: saved.id, userId, userName: client.userName, message, timestamp: saved.createdAt,
+          id: saved.id, userId: participantId, userName: client.userName, message, timestamp: saved.createdAt,
         });
         break;
       }
 
-      // ── Hand raise ──────────────────────────────────────────────────────────
       case 'raise-hand': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c) return;
-        this.signal.broadcast(c.roomId, 'hand-raised', { userId, userName: c.userName, raised: true });
+        this.signal.broadcast(c.roomId, 'hand-raised', { userId: participantId, userName: c.userName, raised: true });
         break;
       }
 
       case 'lower-hand': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c) return;
-        this.signal.broadcast(c.roomId, 'hand-raised', { userId, userName: c.userName, raised: false });
+        this.signal.broadcast(c.roomId, 'hand-raised', { userId: participantId, userName: c.userName, raised: false });
         break;
       }
 
-      // ── Reactions ───────────────────────────────────────────────────────────
       case 'reaction': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c) return;
         const type = d.type as string;
-        if (!this.reaction.isValid(type)) { this.signal.sendDirect(ws, 'error', { message: 'Invalid reaction type' }); return; }
-        if (this.reaction.isRateLimited(userId)) return;
-        this.reaction.record(userId);
-        this.signal.broadcast(c.roomId, 'reaction', { userId, userName: c.userName, type, timestamp: Date.now() });
+        if (!this.reaction.isValid(type)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Invalid reaction type' });
+          return;
+        }
+        if (this.reaction.isRateLimited(participantId)) return;
+        this.reaction.record(participantId);
+        this.signal.broadcast(c.roomId, 'reaction', {
+          userId: participantId, userName: c.userName, type, timestamp: Date.now(),
+        });
         break;
       }
 
-      // ── Polls ───────────────────────────────────────────────────────────────
       case 'poll-create': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c || !['host', 'presenter'].includes(c.role)) {
-          this.signal.sendDirect(ws, 'error', { message: 'Only host/presenter can create polls' }); return;
+          this.signal.sendDirect(ws, 'error', { message: 'Only host/presenter can create polls' });
+          return;
         }
         const p = await this.poll.createPoll(c.roomId, d.question as string, d.options as string[]);
         this.signal.broadcast(c.roomId, 'poll-created', p);
@@ -171,33 +239,34 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       }
 
       case 'poll-vote': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c) return;
-        const result = await this.poll.submitVote(d.pollId as string, d.optionId as string, userId);
+        const result = await this.poll.submitVote(d.pollId as string, d.optionId as string, participantId);
         this.signal.broadcast(c.roomId, 'poll-result', result);
         break;
       }
 
       case 'poll-close': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
-        if (!c || c.role !== 'host') { this.signal.sendDirect(ws, 'error', { message: 'Only host can close polls' }); return; }
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || c.role !== 'host') {
+          this.signal.sendDirect(ws, 'error', { message: 'Only host can close polls' });
+          return;
+        }
         await this.poll.closePoll(d.pollId as string);
         this.signal.broadcast(c.roomId, 'poll-closed', { pollId: d.pollId });
         break;
       }
 
-      // ── Q&A ─────────────────────────────────────────────────────────────────
       case 'question-submit': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c) return;
-        const q = await this.qa.submit(c.roomId, userId, c.userName, d.text as string);
-        // Notify moderators and host
+        const q = await this.qa.submit(c.roomId, participantId, c.userName, d.text as string);
         this.signal.getRoomClients(c.roomId).forEach((rc) => {
           if (['host', 'moderator'].includes(rc.role)) {
-            this.signal.sendTo(rc.userId, 'question-pending', q);
+            this.signal.sendTo(rc.participantId, 'question-pending', q);
           }
         });
         this.signal.sendDirect(ws, 'question-submitted', { id: q.id, status: q.status });
@@ -205,46 +274,57 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       }
 
       case 'question-approve': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
-        if (!c || !['host', 'moderator'].includes(c.role)) { this.signal.sendDirect(ws, 'error', { message: 'Not authorized' }); return; }
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !['host', 'moderator'].includes(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
+          return;
+        }
         const q = await this.qa.approve(d.questionId as string);
         this.signal.broadcast(c.roomId, 'question-approved', q);
         break;
       }
 
       case 'question-reject': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
-        if (!c || !['host', 'moderator'].includes(c.role)) { this.signal.sendDirect(ws, 'error', { message: 'Not authorized' }); return; }
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !['host', 'moderator'].includes(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
+          return;
+        }
         const q = await this.qa.reject(d.questionId as string);
         this.signal.sendTo(q.userId, 'question-rejected', { id: q.id });
         break;
       }
 
       case 'question-answer': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
-        if (!c || !['host', 'presenter'].includes(c.role)) { this.signal.sendDirect(ws, 'error', { message: 'Not authorized' }); return; }
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !['host', 'presenter'].includes(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
+          return;
+        }
         const q = await this.qa.answer(d.questionId as string, d.answer as string);
         this.signal.broadcast(c.roomId, 'question-answered', q);
         break;
       }
 
       case 'question-upvote': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
         if (!c) return;
-        const q = await this.qa.upvote(d.questionId as string, userId);
+        const q = await this.qa.upvote(d.questionId as string, participantId);
         this.signal.broadcast(c.roomId, 'question-upvoted', { id: q.id, upvotes: q.upvotes });
         break;
       }
 
-      // ── Waiting room admit ──────────────────────────────────────────────────
       case 'admit-participant': {
-        if (!userId) return;
-        const c = this.signal.getClient(userId);
-        if (!c || c.role !== 'host') { this.signal.sendDirect(ws, 'error', { message: 'Only host can admit' }); return; }
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || c.role !== 'host') {
+          this.signal.sendDirect(ws, 'error', { message: 'Only host can admit' });
+          return;
+        }
         const targetId = d.userId as string;
         this.signal.sendTo(targetId, 'participant-admitted', { roomId: c.roomId, admittedBy: c.userName });
         this.signal.broadcast(c.roomId, 'participant-admitted', { userId: targetId });

@@ -3,26 +3,19 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import { UserEntity } from '../database/entities/user.entity';
 import { AttendanceEntity } from '../database/entities/attendance.entity';
 import { SessionEntity } from '../database/entities/session.entity';
 import { InvitesService } from '../invites/invites.service';
 import { TokenService } from '../livekit/token.service';
-import { UserRole } from '@webinar/shared';
-
-export interface JoinTokenResponse {
-  livekitToken: string;
-  signalToken: string;
-  livekitUrl: string;
-  roomName: string;
-  sessionId: string;
-  sessionTitle: string;
-  scheduledAt: Date;
-  instructorName: string;
-}
+import { UserRole, ParticipantRole, type JoinGrant } from '@webinar/shared';
+import { IceService } from './ice.service';
 
 @Injectable()
 export class JoinService {
+  private readonly useNativeWebRtc: boolean;
+
   constructor(
     @InjectRepository(UserEntity)
     private readonly userRepository: Repository<UserEntity>,
@@ -34,9 +27,12 @@ export class JoinService {
     private readonly tokenService: TokenService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
-  ) {}
+    private readonly iceService: IceService,
+  ) {
+    this.useNativeWebRtc = this.configService.get<string>('USE_NATIVE_WEBRTC', 'false') === 'true';
+  }
 
-  async requestJoin(inviteToken: string, userName: string): Promise<JoinTokenResponse> {
+  async requestJoin(inviteToken: string, userName: string): Promise<JoinGrant & { roomName: string; sessionTitle: string; instructorName: string }> {
     const sessionDetails = await this.invitesService.resolveInvite(inviteToken);
 
     const email = `${userName.toLowerCase().replace(/\s+/g, '_')}@attendee.local`;
@@ -54,22 +50,19 @@ export class JoinService {
     });
     await this.attendanceRepository.save(attendance);
 
-    // Use REAL room name from database
-    const roomName = await this.getRoomNameForSession(sessionDetails.sessionId);
-    const livekitToken = await this.tokenService.generateAttendeeToken(roomName, user.id, userName);
-
-    // Signal token — uses the app JWT_SECRET so the signal gateway can validate it.
-    // This is intentionally different from livekitToken (signed with LIVEKIT_API_SECRET).
-    const signalToken = this.issueSignalToken(user.id, email, 'attendee', roomName);
+    const roomId = await this.getRoomIdForSession(sessionDetails.sessionId);
+    const grant = await this.buildJoinGrant(
+      user.id,
+      userName,
+      roomId,
+      sessionDetails.sessionId,
+      ParticipantRole.ATTENDEE,
+    );
 
     return {
-      livekitToken,
-      signalToken,
-      livekitUrl: '', // Client constructs URL via Vite proxy
-      roomName,
-      sessionId: sessionDetails.sessionId,
+      ...grant,
+      roomName: roomId,
       sessionTitle: sessionDetails.title,
-      scheduledAt: sessionDetails.scheduledAt,
       instructorName: sessionDetails.instructorName,
     };
   }
@@ -78,15 +71,22 @@ export class JoinService {
     sessionId: string,
     instructorId: string,
     instructorName: string,
-  ): Promise<{ token: string; signalToken: string; roomName: string }> {
-    const roomName = await this.getRoomNameForSession(sessionId);
-    const token = await this.tokenService.generateInstructorToken(roomName, instructorId, instructorName);
+  ): Promise<{ token: string; signalToken: string; roomName: string; grant: JoinGrant }> {
+    const roomId = await this.getRoomIdForSession(sessionId);
+    const grant = await this.buildJoinGrant(
+      instructorId,
+      instructorName,
+      roomId,
+      sessionId,
+      ParticipantRole.HOST,
+    );
 
-    // Signal token for the host — role 'host' allows creating polls, closing Q&A, etc.
-    const email = `${instructorName.toLowerCase().replace(/\s+/g, '_')}@instructor.local`;
-    const signalToken = this.issueSignalToken(instructorId, email, 'host', roomName);
-
-    return { token, signalToken, roomName };
+    return {
+      token: grant.livekitToken ?? '',
+      signalToken: grant.signalToken,
+      roomName: roomId,
+      grant,
+    };
   }
 
   async registerForSession(sessionId: string, name: string, email: string): Promise<{ token: string; inviteUrl: string }> {
@@ -113,25 +113,66 @@ export class JoinService {
     return { token, inviteUrl };
   }
 
+  getIceServersForParticipant(participantId: string) {
+    return this.iceService.getIceServers(participantId);
+  }
+
+  getDiagnosticIceServers() {
+    return this.iceService.getIceServers(this.iceService.createDiagnosticParticipantId());
+  }
+
   // ─── Private helpers ──────────────────────────────────────────────────────
 
-  /**
-   * Issues an app JWT for the signal gateway.
-   * The gateway calls jwtService.verify() with JWT_SECRET — this token passes.
-   * The LiveKit token (signed with LIVEKIT_API_SECRET) does NOT pass, which is
-   * why chat/polls/Q&A were broken before this fix.
-   */
-  private issueSignalToken(userId: string, email: string, role: string, roomId: string): string {
+  private async buildJoinGrant(
+    participantId: string,
+    displayName: string,
+    roomId: string,
+    sessionId: string,
+    role: ParticipantRole,
+  ): Promise<JoinGrant> {
+    const { iceServers } = this.iceService.getIceServers(participantId);
+    const signalToken = this.issueSignalToken(participantId, displayName, role, roomId);
+
+    let livekitToken: string | undefined;
+    if (!this.useNativeWebRtc) {
+      if (role === ParticipantRole.HOST) {
+        livekitToken = await this.tokenService.generateInstructorToken(roomId, participantId, displayName);
+      } else {
+        livekitToken = await this.tokenService.generateAttendeeToken(roomId, participantId, displayName);
+      }
+    }
+
+    return {
+      participantId,
+      roomId,
+      sessionId,
+      role,
+      displayName,
+      signalToken,
+      iceServers,
+      livekitToken,
+      livekitUrl: '',
+    };
+  }
+
+  private issueSignalToken(
+    participantId: string,
+    displayName: string,
+    role: ParticipantRole,
+    roomId: string,
+  ): string {
     const jwtSecret = this.configService.get<string>('JWT_SECRET', 'dev-secret-change-me');
+    const jti = randomUUID();
     return this.jwtService.sign(
-      { sub: userId, email, role, roomId },
+      { sub: participantId, roomId, role, jti, displayName },
       { secret: jwtSecret, expiresIn: '6h' },
     );
   }
 
-  private async getRoomNameForSession(sessionId: string): Promise<string> {
+  /** roomId === sessionId (unified across API, signal, client) */
+  private async getRoomIdForSession(sessionId: string): Promise<string> {
     const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
     if (!session) throw new NotFoundException(`Session ${sessionId} not found`);
-    return session.liveKitRoomName;
+    return session.id;
   }
 }

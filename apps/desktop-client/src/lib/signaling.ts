@@ -43,6 +43,11 @@ export class SignalingClient {
   /** Fired when the host ends the session server-side. Stop reconnecting; show ended screen. */
   public onSessionEnded: ((data: any) => void) | null = null;
 
+  public onWebRtcOffer: ((data: { fromParticipantId: string; targetParticipantId: string; sdp: RTCSessionDescriptionInit; connectionEpoch: number }) => void) | null = null;
+  public onWebRtcAnswer: ((data: { fromParticipantId: string; targetParticipantId: string; sdp: RTCSessionDescriptionInit; connectionEpoch: number }) => void) | null = null;
+  public onWebRtcIce: ((data: { fromParticipantId: string; targetParticipantId: string; candidate: RTCIceCandidateInit; connectionEpoch: number }) => void) | null = null;
+  public onWebRtcRestart: ((data: { fromParticipantId: string; targetParticipantId: string; connectionEpoch: number }) => void) | null = null;
+
   constructor(private readonly serverUrl: string) {}
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -80,6 +85,19 @@ export class SignalingClient {
   answerQuestion(questionId: string, answer: string): void { this.send({ event: 'question-answer', data: { questionId, answer } }); }
   upvoteQuestion(questionId: string): void { this.send({ event: 'question-upvote', data: { questionId } }); }
   admitParticipant(userId: string): void { this.send({ event: 'admit-participant', data: { userId } }); }
+
+  sendWebRtcOffer(data: { fromParticipantId: string; targetParticipantId: string; sdp: RTCSessionDescriptionInit; connectionEpoch: number }): void {
+    this.send({ event: 'webrtc-offer', data: data as unknown as Record<string, unknown> });
+  }
+  sendWebRtcAnswer(data: { fromParticipantId: string; targetParticipantId: string; sdp: RTCSessionDescriptionInit; connectionEpoch: number }): void {
+    this.send({ event: 'webrtc-answer', data: data as unknown as Record<string, unknown> });
+  }
+  sendWebRtcIce(data: { fromParticipantId: string; targetParticipantId: string; candidate: RTCIceCandidateInit; connectionEpoch: number }): void {
+    this.send({ event: 'webrtc-ice', data: data as unknown as Record<string, unknown> });
+  }
+  sendWebRtcRestart(data: { fromParticipantId: string; targetParticipantId: string; connectionEpoch: number }): void {
+    this.send({ event: 'webrtc-restart', data: data as unknown as Record<string, unknown> });
+  }
 
   // ── Private ────────────────────────────────────────────────────────────────
 
@@ -132,10 +150,23 @@ export class SignalingClient {
         case 'question-upvoted': this.onQuestionUpvoted?.(d); break;
         case 'participant-admitted': this.onParticipantAdmitted?.(d); break;
         case 'session-ended':
-          // Stop trying to reconnect — the room is gone intentionally
           this.shouldReconnect = false;
           this.clearReconnectTimer();
           this.onSessionEnded?.(d);
+          break;
+        case 'pong':
+          break;
+        case 'webrtc-offer':
+          this.onWebRtcOffer?.(d);
+          break;
+        case 'webrtc-answer':
+          this.onWebRtcAnswer?.(d);
+          break;
+        case 'webrtc-ice':
+          this.onWebRtcIce?.(d);
+          break;
+        case 'webrtc-restart':
+          this.onWebRtcRestart?.(d);
           break;
         case 'error': this.onError?.(d?.message ?? 'Unknown server error'); break;
       }
@@ -166,7 +197,7 @@ export class SignalingClient {
 
   private startHeartbeat(): void {
     this.clearHeartbeat();
-    this.heartbeatTimer = setInterval(() => this.send({ event: 'heartbeat' }), 20000);
+    this.heartbeatTimer = setInterval(() => this.send({ event: 'ping', data: { ts: Date.now() } }), 15000);
   }
 
   private clearHeartbeat(): void {

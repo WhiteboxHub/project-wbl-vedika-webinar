@@ -8,13 +8,15 @@ export interface ClassroomSessionData {
   sessionId: string;
 }
 
-/** Data passed to the new WebinarRoom (no LiveKit dependency) */
+import type { JoinGrant } from '@webinar/shared';
+
+/** Native WebRTC session (no LiveKit) */
 export interface WebinarSessionData {
   roomId: string;
-  userId: string;
-  userName: string;
+  participantId: string;
   isHost: boolean;
   sessionId: string;
+  grant: JoinGrant;
 }
 
 const KEY_PREFIX = 'classroom_session_';
@@ -59,9 +61,11 @@ export function getSignalServerUrl(): string {
  *
  * LOCAL DEV  — Use the Vite dev server proxy path (/livekit).
  *   The Vite proxy rewrites ws://localhost:5173/livekit → ws://localhost:7880.
- *   This keeps the browser talking to localhost:5173 so LiveKit's node_ip
- *   (127.0.0.1) ICE candidates are reachable. Direct ws://localhost:7880
- *   bypasses the proxy and causes ICE failures on some network configs.
+ *   LiveKit ICE uses LIVEKIT_NODE_IP (see docker/livekit.yaml.template).
+ *
+ * CROSS-DEVICE — Host and attendees must open the SAME origin, e.g. http://192.168.0.60:5173
+ *   (not localhost on one side and LAN IP on the other). Set LIVEKIT_NODE_IP in .env and
+ *   run `pnpm docker:up` to regenerate LiveKit config.
  *
  * PRODUCTION — Set VITE_LIVEKIT_URL=wss://your-livekit-domain.com in .env.
  *   Or leave empty to use the /livekit proxy path on your own server.

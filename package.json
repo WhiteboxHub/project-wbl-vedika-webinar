@@ -13,9 +13,11 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "clean": "turbo run clean && rm -rf node_modules",
-    "docker:up": "docker compose up -d",
+    "docker:up": "node scripts/configure-livekit.mjs && docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
+    "docker:configure-livekit": "node scripts/configure-livekit.mjs",
+    "dev:client": "pnpm --filter @webinar/desktop-client dev",
     "tunnel": "npx cloudflared tunnel --url http://localhost:5173"
   },
   "devDependencies": {

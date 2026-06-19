@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { resolveInvite, joinSession } from '../lib/api';
-import { saveClassroomSession, getLiveKitUrl } from '../lib/classroom-session';
+import { saveClassroomSession, saveWebinarSession, getLiveKitUrl } from '../lib/classroom-session';
+
+const USE_NATIVE_WEBRTC = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_USE_NATIVE_WEBRTC === 'true';
 import { Loader2, Radio, Clock, Users, LogIn, CheckCircle, XCircle } from 'lucide-react';
 
 type State = 'loading' | 'name-entry' | 'waiting' | 'joining' | 'error';
@@ -37,25 +39,38 @@ export default function WaitingRoom() {
     setState('joining');
     try {
       const data = await joinSession(token, joinName);
-      const roomName = data.roomName;
-      saveClassroomSession(roomName, {
-        participantName: joinName,
-        isHost: false,
-        sessionId: (data as any).sessionId || '',
-        liveKitToken: data.livekitToken,
-        signalToken: (data as any).signalToken ?? '',
-        livekitUrl: getLiveKitUrl(),
-      });
-      navigate(`/class/${roomName}`, {
-        state: {
+      const roomId = data.roomId;
+
+      if (USE_NATIVE_WEBRTC) {
+        const webinarData = {
+          roomId,
+          participantId: data.participantId,
+          isHost: false,
+          sessionId: data.sessionId,
+          grant: data,
+        };
+        saveWebinarSession(roomId, webinarData);
+        navigate(`/class/${roomId}`, { state: webinarData });
+      } else {
+        saveClassroomSession(roomId, {
           participantName: joinName,
           isHost: false,
-          sessionId: (data as any).sessionId || '',
-          liveKitToken: data.livekitToken,
-          signalToken: (data as any).signalToken ?? '',
+          sessionId: data.sessionId || '',
+          liveKitToken: data.livekitToken!,
+          signalToken: data.signalToken,
           livekitUrl: getLiveKitUrl(),
-        },
-      });
+        });
+        navigate(`/class/${roomId}`, {
+          state: {
+            participantName: joinName,
+            isHost: false,
+            sessionId: data.sessionId || '',
+            liveKitToken: data.livekitToken,
+            signalToken: data.signalToken,
+            livekitUrl: getLiveKitUrl(),
+          },
+        });
+      }
     } catch (err: any) {
       setState('error');
       setErrorMsg(err.message || 'Failed to join session');
