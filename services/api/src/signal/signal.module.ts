@@ -10,6 +10,7 @@ import { PollService } from './poll.service';
 import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
 import { GraceService } from './grace.service';
+import { HandsModule } from '../hands/hands.module';
 import { ChatMessageEntity } from '../database/entities/chat-message.entity';
 import { PollEntity } from '../database/entities/poll.entity';
 import { PollOptionEntity } from '../database/entities/poll-option.entity';
@@ -18,6 +19,7 @@ import { QuestionEntity } from '../database/entities/question.entity';
 
 @Module({
   imports: [
+    HandsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (cs: ConfigService) => ({

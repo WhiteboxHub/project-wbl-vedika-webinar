@@ -231,12 +231,52 @@ export async function getHostToken(sessionId: string): Promise<JoinTokenResponse
   return { ...data, roomName: data.roomId ?? data.roomName };
 }
 
-export async function muteParticipant(sessionId: string, identity: string, trackSid: string): Promise<void> {
-  await fetch(`${API_BASE}/classes/${sessionId}/participants/${identity}/mute`, {
+export async function muteParticipant(
+  sessionId: string,
+  identity: string,
+  trackSid: string,
+  muted = true,
+): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/participants/${identity}/mute`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ trackSid, muted: true }),
+    body: JSON.stringify({ trackSid, muted }),
   });
+  if (!res.ok) throw new Error('Failed to mute participant');
+}
+
+export async function promoteParticipant(
+  sessionId: string,
+  userId: string,
+  role: string,
+): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/participants/${userId}/role`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) throw new Error('Failed to update participant role');
+}
+
+export async function approveParticipantAudio(
+  sessionId: string,
+  userId: string,
+  approved: boolean,
+): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/participants/${userId}/audio-approval`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ approved }),
+  });
+  if (!res.ok) throw new Error('Failed to update audio approval');
+}
+
+export async function getSessionParticipants(sessionId: string) {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/participants`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to load participants');
+  return res.json();
 }
 
 export async function removeParticipant(sessionId: string, identity: string): Promise<void> {

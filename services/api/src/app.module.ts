@@ -10,6 +10,10 @@ import { JoinModule } from './join/join.module';
 import { HealthModule } from './health/health.module';
 import { RecordingModule } from './recording/recording.module';
 import { SignalModule } from './signal/signal.module';
+import { ParticipantsModule } from './participants/participants.module';
+import { HandsModule } from './hands/hands.module';
+import { EmailModule } from './email/email.module';
+import { QaModule } from './qa/qa.module';
 
 @Module({
   imports: [
@@ -19,6 +23,10 @@ import { SignalModule } from './signal/signal.module';
     SessionsModule,
     InvitesModule,
     JoinModule,
+    ParticipantsModule,
+    HandsModule,
+    EmailModule,
+    QaModule,
     BullModule.forRootAsync({
       imports: [NestConfigModule],
       useFactory: async (configService: ConfigService) => ({

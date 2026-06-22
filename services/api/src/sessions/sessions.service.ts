@@ -6,6 +6,8 @@ import { CreateSessionRequest, UpdateSessionRequest, SessionStatus } from '@webi
 import { randomBytes } from 'crypto';
 import { TokenService } from '../livekit/token.service';
 import { SignalService } from '../signal/signal.service';
+import { ParticipantsService } from '../participants/participants.service';
+import { SessionRole } from '@webinar/shared';
 
 @Injectable()
 export class SessionsService {
@@ -16,6 +18,7 @@ export class SessionsService {
     private readonly sessionRepository: Repository<SessionEntity>,
     private readonly tokenService: TokenService,
     private readonly signalService: SignalService,
+    private readonly participantsService: ParticipantsService,
   ) {}
 
   async createSession(
@@ -37,7 +40,22 @@ export class SessionsService {
 
     const saved = await this.sessionRepository.save(session);
     saved.liveKitRoomName = saved.id;
-    return await this.sessionRepository.save(saved);
+    const finalSession = await this.sessionRepository.save(saved);
+
+    const instructor = await this.sessionRepository.findOne({
+      where: { id: finalSession.id },
+      relations: ['instructor'],
+    });
+    if (instructor?.instructor) {
+      await this.participantsService.upsertParticipant(
+        finalSession.id,
+        instructorId,
+        instructor.instructor.name,
+        SessionRole.ORGANIZER,
+      );
+    }
+
+    return finalSession;
   }
 
   async getSession(sessionId: string): Promise<SessionEntity> {

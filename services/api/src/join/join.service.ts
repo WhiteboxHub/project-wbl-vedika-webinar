@@ -9,8 +9,10 @@ import { AttendanceEntity } from '../database/entities/attendance.entity';
 import { SessionEntity } from '../database/entities/session.entity';
 import { InvitesService } from '../invites/invites.service';
 import { TokenService } from '../livekit/token.service';
-import { UserRole, ParticipantRole, type JoinGrant } from '@webinar/shared';
+import { UserRole, SessionRole, type JoinGrant, toSignalRole } from '@webinar/shared';
 import { IceService } from './ice.service';
+import { ParticipantsService } from '../participants/participants.service';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class JoinService {
@@ -28,6 +30,8 @@ export class JoinService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly iceService: IceService,
+    private readonly participantsService: ParticipantsService,
+    private readonly emailService: EmailService,
   ) {
     this.useNativeWebRtc = this.configService.get<string>('USE_NATIVE_WEBRTC', 'false') === 'true';
   }
@@ -56,7 +60,14 @@ export class JoinService {
       userName,
       roomId,
       sessionDetails.sessionId,
-      ParticipantRole.ATTENDEE,
+      SessionRole.ATTENDEE,
+    );
+
+    await this.participantsService.upsertParticipant(
+      sessionDetails.sessionId,
+      user.id,
+      userName,
+      SessionRole.ATTENDEE,
     );
 
     return {
@@ -78,7 +89,14 @@ export class JoinService {
       instructorName,
       roomId,
       sessionId,
-      ParticipantRole.HOST,
+      SessionRole.ORGANIZER,
+    );
+
+    await this.participantsService.upsertParticipant(
+      sessionId,
+      instructorId,
+      instructorName,
+      SessionRole.ORGANIZER,
     );
 
     return {
@@ -90,7 +108,7 @@ export class JoinService {
   }
 
   async registerForSession(sessionId: string, name: string, email: string): Promise<{ token: string; inviteUrl: string }> {
-    const session = await this.sessionRepository.findOne({ where: { id: sessionId } });
+    const session = await this.sessionRepository.findOne({ where: { id: sessionId }, relations: ['instructor'] });
     if (!session) throw new NotFoundException('Session not found');
 
     let user = await this.userRepository.findOne({ where: { email } });
@@ -110,6 +128,15 @@ export class JoinService {
     const inviteUrl = publicAppUrl
       ? `${publicAppUrl}/waiting/${token}`
       : `webinar://join?token=${token}`;
+
+    await this.emailService.sendRegistrationConfirmation(
+      sessionId,
+      user.id,
+      email,
+      session.title,
+      inviteUrl,
+    );
+
     return { token, inviteUrl };
   }
 
@@ -128,14 +155,14 @@ export class JoinService {
     displayName: string,
     roomId: string,
     sessionId: string,
-    role: ParticipantRole,
+    role: SessionRole,
   ): Promise<JoinGrant> {
     const { iceServers } = this.iceService.getIceServers(participantId);
     const signalToken = this.issueSignalToken(participantId, displayName, role, roomId);
 
     let livekitToken: string | undefined;
     if (!this.useNativeWebRtc) {
-      if (role === ParticipantRole.HOST) {
+      if (role === SessionRole.ORGANIZER || role === SessionRole.CO_ORGANIZER || role === SessionRole.PRESENTER) {
         livekitToken = await this.tokenService.generateInstructorToken(roomId, participantId, displayName);
       } else {
         livekitToken = await this.tokenService.generateAttendeeToken(roomId, participantId, displayName);
@@ -158,13 +185,13 @@ export class JoinService {
   private issueSignalToken(
     participantId: string,
     displayName: string,
-    role: ParticipantRole,
+    role: SessionRole,
     roomId: string,
   ): string {
     const jwtSecret = this.configService.get<string>('JWT_SECRET', 'dev-secret-change-me');
     const jti = randomUUID();
     return this.jwtService.sign(
-      { sub: participantId, roomId, role, jti, displayName },
+      { sub: participantId, roomId, role: toSignalRole(role), jti, displayName },
       { secret: jwtSecret, expiresIn: '6h' },
     );
   }

@@ -13,6 +13,8 @@ import { PollOptionEntity } from './entities/poll-option.entity';
 import { PollVoteEntity } from './entities/poll-vote.entity';
 import { QuestionEntity } from './entities/question.entity';
 import { WaitingRoomEntryEntity } from './entities/waiting-room-entry.entity';
+import { SessionParticipantEntity } from './entities/session-participant.entity';
+import { EmailVerificationEntity } from './entities/email-verification.entity';
 import { AuditService } from './audit.service';
 
 const ALL_ENTITIES = [
@@ -28,6 +30,8 @@ const ALL_ENTITIES = [
   PollVoteEntity,
   QuestionEntity,
   WaitingRoomEntryEntity,
+  SessionParticipantEntity,
+  EmailVerificationEntity,
 ];
 
 @Module({

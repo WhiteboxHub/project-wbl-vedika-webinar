@@ -1,3 +1,5 @@
+import type { ParticipantRole } from './roles';
+
 // User types
 export enum UserRole {
   INSTRUCTOR = 'instructor',
@@ -261,13 +263,22 @@ export interface HealthCheck {
   };
 }
 
-// ─── Participant Roles ────────────────────────────────────────────────────────
-export enum ParticipantRole {
-  HOST = 'host',
-  PRESENTER = 'presenter',
-  MODERATOR = 'moderator',
-  ATTENDEE = 'attendee',
-}
+// ─── Participant Roles (enterprise model in roles.ts) ─────────────────────────
+export {
+  SessionRole,
+  ParticipantRole,
+  normalizeSessionRole,
+  canModerateSession,
+  defaultCapabilities,
+  toSignalRole,
+} from './roles';
+export type {
+  SessionParticipantCapabilities,
+  SessionParticipantRecord,
+  RaisedHandEntry,
+  AudioRequestEntry,
+  AudioRequestStatus,
+} from './roles';
 
 // ─── Waiting Room State Machine ───────────────────────────────────────────────
 export enum WaitingRoomState {

@@ -19,6 +19,9 @@ export class UserEntity {
   })
   role: UserRole;
 
+  @Column({ name: 'email_verified', default: false })
+  emailVerified: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

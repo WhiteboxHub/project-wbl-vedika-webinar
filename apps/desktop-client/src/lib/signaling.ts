@@ -40,6 +40,12 @@ export class SignalingClient {
   public onQuestionAnswered: ((q: any) => void) | null = null;
   public onQuestionUpvoted: ((data: { id: string; upvotes: number }) => void) | null = null;
   public onParticipantAdmitted: ((data: any) => void) | null = null;
+  public onRoleChanged: ((data: any) => void) | null = null;
+  public onParticipantMuted: ((data: { userId: string; trackSid: string; muted: boolean }) => void) | null = null;
+  public onParticipantRemoved: ((data: { userId: string }) => void) | null = null;
+  public onAudioRequested: ((data: any) => void) | null = null;
+  public onAudioApproved: ((data: { userId: string }) => void) | null = null;
+  public onAudioDenied: ((data: { userId: string }) => void) | null = null;
   /** Fired when the host ends the session server-side. Stop reconnecting; show ended screen. */
   public onSessionEnded: ((data: any) => void) | null = null;
 
@@ -75,6 +81,9 @@ export class SignalingClient {
   sendChat(message: string): void { this.send({ event: 'chat', data: { message } }); }
   raiseHand(): void { this.send({ event: 'raise-hand' }); }
   lowerHand(): void { this.send({ event: 'lower-hand' }); }
+  requestAudio(): void { this.send({ event: 'request-audio' }); }
+  approveAudio(userId: string): void { this.send({ event: 'approve-audio', data: { userId } }); }
+  denyAudio(userId: string): void { this.send({ event: 'deny-audio', data: { userId } }); }
   sendReaction(type: ReactionType): void { this.send({ event: 'reaction', data: { type } }); }
   createPoll(question: string, options: string[]): void { this.send({ event: 'poll-create', data: { question, options } }); }
   votePoll(pollId: string, optionId: string): void { this.send({ event: 'poll-vote', data: { pollId, optionId } }); }
@@ -149,6 +158,12 @@ export class SignalingClient {
         case 'question-answered': this.onQuestionAnswered?.(d); break;
         case 'question-upvoted': this.onQuestionUpvoted?.(d); break;
         case 'participant-admitted': this.onParticipantAdmitted?.(d); break;
+        case 'role-changed': this.onRoleChanged?.(d); break;
+        case 'participant-muted': this.onParticipantMuted?.(d); break;
+        case 'participant-removed': this.onParticipantRemoved?.(d); break;
+        case 'audio-requested': this.onAudioRequested?.(d); break;
+        case 'audio-approved': this.onAudioApproved?.(d); break;
+        case 'audio-denied': this.onAudioDenied?.(d); break;
         case 'session-ended':
           this.shouldReconnect = false;
           this.clearReconnectTimer();

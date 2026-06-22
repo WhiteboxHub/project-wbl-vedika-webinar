@@ -9,6 +9,8 @@ import { AttendanceEntity } from '../database/entities/attendance.entity';
 import { SessionEntity } from '../database/entities/session.entity';
 import { InvitesModule } from '../invites/invites.module';
 import { LiveKitModule } from '../livekit/livekit.module';
+import { ParticipantsModule } from '../participants/participants.module';
+import { EmailModule } from '../email/email.module';
 
 import { IceService } from './ice.service';
 
@@ -17,6 +19,8 @@ import { IceService } from './ice.service';
     TypeOrmModule.forFeature([UserEntity, AttendanceEntity, SessionEntity]),
     InvitesModule,
     LiveKitModule,
+    ParticipantsModule,
+    EmailModule,
     ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

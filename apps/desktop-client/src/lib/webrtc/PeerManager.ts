@@ -30,6 +30,13 @@ export class PeerManager {
   private readonly log: RtcLogger;
   private localStream: MediaStream | null = null;
 
+  /**
+   * ICE candidate buffer — holds candidates that arrive via trickle ICE
+   * before setRemoteDescription() has finished. Null means the remote
+   * description is already set and candidates can be applied immediately.
+   */
+  private iceCandidateBuffer: RTCIceCandidateInit[] | null = [];
+
   constructor(private readonly opts: PeerManagerOptions) {
     this.log = new RtcLogger('PeerManager', opts.roomId, opts.participantId);
   }
@@ -111,6 +118,10 @@ export class PeerManager {
     if (epoch < this.connectionEpoch) return;
     this.connectionEpoch = epoch;
 
+    // Reset the buffer so candidates received during this offer/answer round
+    // are queued until setRemoteDescription completes.
+    this.iceCandidateBuffer = [];
+
     await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
@@ -120,20 +131,59 @@ export class PeerManager {
       targetParticipantId: this.opts.remoteParticipantId,
       sdp: answer,
     });
+
+    // Flush buffered candidates now that the remote description is set.
+    await this.flushIceCandidateBuffer();
   }
 
   async handleAnswer(sdp: RTCSessionDescriptionInit, epoch: number): Promise<void> {
     if (!this.pc || epoch < this.connectionEpoch) return;
+
+    // Reset buffer so any candidates already queued from before the answer
+    // wait until setRemoteDescription completes.
+    this.iceCandidateBuffer = [];
+
     await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
     this.transition(PeerState.ANSWER_RECEIVED, 'answer_applied');
+
+    // Flush buffered candidates now that the remote description is set.
+    await this.flushIceCandidateBuffer();
   }
 
   async handleIce(candidate: RTCIceCandidateInit, epoch: number): Promise<void> {
     if (!this.pc || epoch < this.connectionEpoch || !candidate) return;
+
+    // If the remote description hasn't been applied yet, buffer this candidate
+    // rather than calling addIceCandidate() and getting an InvalidStateError
+    // that would be swallowed, silently losing the candidate.
+    if (this.iceCandidateBuffer !== null) {
+      this.log.debug('ice_candidate_buffered', { buffered: this.iceCandidateBuffer.length + 1 });
+      this.iceCandidateBuffer.push(candidate);
+      return;
+    }
+
+    await this.applyIceCandidate(candidate);
+  }
+
+  /** Apply a single ICE candidate to the peer connection, logging failures. */
+  private async applyIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
     try {
-      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      await this.pc!.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
       this.log.warn('add_ice_failed', { error: String(err) });
+    }
+  }
+
+  /**
+   * Drain the ICE candidate buffer after setRemoteDescription() resolves.
+   * Sets the buffer to null so future candidates are applied immediately.
+   */
+  private async flushIceCandidateBuffer(): Promise<void> {
+    const buffered = this.iceCandidateBuffer ?? [];
+    this.iceCandidateBuffer = null; // null = remote desc is set; apply directly hereafter
+    this.log.debug('ice_buffer_flushed', { count: buffered.length });
+    for (const c of buffered) {
+      await this.applyIceCandidate(c);
     }
   }
 
@@ -179,6 +229,8 @@ export class PeerManager {
     this.localStream?.getTracks().forEach(t => t.stop());
     this.pc?.close();
     this.pc = null;
+    // Reset the buffer so a future connect() starts clean.
+    this.iceCandidateBuffer = [];
     this.transition(PeerState.IDLE, 'closed');
   }
 }

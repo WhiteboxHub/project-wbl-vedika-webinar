@@ -30,7 +30,12 @@ export default defineConfig({
         changeOrigin: true,
         rewriteWsOrigin: true,
         rewrite: (path) => path.replace(/^\/livekit/, ''),
-      }
+      },
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        ws: true,
+        changeOrigin: true,
+      },
     }
   },
   envPrefix: ['VITE_', 'TAURI_'],

@@ -1,4 +1,4 @@
-import { ParticipantRole } from './types';
+import { ParticipantRole, SessionRole } from './roles';
 
 /** Client-side WebRTC connection state machine */
 export enum PeerState {
@@ -20,7 +20,7 @@ export interface JoinGrant {
   participantId: string;
   roomId: string;
   sessionId: string;
-  role: ParticipantRole;
+  role: SessionRole | ParticipantRole | string;
   displayName: string;
   signalToken: string;
   iceServers: RTCIceServerConfig[];

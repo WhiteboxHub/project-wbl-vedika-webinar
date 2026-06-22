@@ -31,6 +31,7 @@ async function bootstrap() {
   const logger = new Logger();
   logger.log(`API server running on http://localhost:${port}`, 'Bootstrap');
   logger.log(`Signal WebSocket: ws://localhost:${port}/signal`, 'Bootstrap');
+  logger.log(`Q&A Socket.IO: http://localhost:${port}/qa`, 'Bootstrap');
 }
 
 bootstrap();

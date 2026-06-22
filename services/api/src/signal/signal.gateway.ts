@@ -9,7 +9,17 @@ import { PollService } from './poll.service';
 import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
 import { GraceService } from './grace.service';
-import { ParticipantRole } from '@webinar/shared';
+import { HandsService } from '../hands/hands.service';
+import { ParticipantRole, SessionRole, canModerateSession, normalizeSessionRole } from '@webinar/shared';
+
+function canModerate(role: string): boolean {
+  return canModerateSession(normalizeSessionRole(role));
+}
+
+function canPresent(role: string): boolean {
+  const r = normalizeSessionRole(role);
+  return canModerateSession(r) || r === SessionRole.PRESENTER;
+}
 
 interface Msg {
   event: string;
@@ -32,6 +42,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly qa: QAService,
     private readonly reaction: ReactionService,
     private readonly grace: GraceService,
+    private readonly hands: HandsService,
   ) {}
 
   afterInit() {
@@ -121,16 +132,20 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
           lastSeen: Date.now(),
         });
 
-        const [history, presenceList, activePoll] = await Promise.all([
+        const [history, presenceList, activePoll, raisedHands, audioRequests] = await Promise.all([
           this.chat.getHistory(roomId),
           this.presence.getRoomPresence(roomId),
           this.poll.getActivePoll(roomId),
+          this.hands.getRaisedHands(roomId),
+          this.hands.getAudioRequests(roomId),
         ]);
 
         this.signal.sendDirect(ws, 'room-state', {
           history,
           presence: presenceList,
           activePoll,
+          raisedHands,
+          audioRequests,
           connectionEpoch: client.connectionEpoch,
         });
         this.signal.broadcast(roomId, 'participant-joined', {
@@ -197,7 +212,8 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
         if (!c) return;
-        this.signal.broadcast(c.roomId, 'hand-raised', { userId: participantId, userName: c.userName, raised: true });
+        const entry = await this.hands.raiseHand(c.roomId, participantId, c.userName);
+        this.signal.broadcast(c.roomId, 'hand-raised', { ...entry, raised: true });
         break;
       }
 
@@ -205,7 +221,51 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
         if (!c) return;
+        await this.hands.lowerHand(c.roomId, participantId);
         this.signal.broadcast(c.roomId, 'hand-raised', { userId: participantId, userName: c.userName, raised: false });
+        break;
+      }
+
+      case 'request-audio': {
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c) return;
+        const req = await this.hands.requestAudio(c.roomId, participantId, c.userName);
+        this.signal.getRoomClients(c.roomId).forEach((rc) => {
+          if (canModerate(rc.role)) {
+            this.signal.sendTo(rc.participantId, 'audio-requested', req);
+          }
+        });
+        this.signal.sendDirect(ws, 'audio-request-pending', req);
+        break;
+      }
+
+      case 'approve-audio': {
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !canModerate(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
+          return;
+        }
+        const targetId = d.userId as string;
+        const req = await this.hands.approveAudio(c.roomId, targetId);
+        if (req) {
+          this.signal.broadcast(c.roomId, 'audio-approved', { userId: targetId });
+          this.signal.sendTo(targetId, 'audio-approved', { userId: targetId, canPublishAudio: true });
+        }
+        break;
+      }
+
+      case 'deny-audio': {
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !canModerate(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
+          return;
+        }
+        const targetId = d.userId as string;
+        await this.hands.denyAudio(c.roomId, targetId);
+        this.signal.sendTo(targetId, 'audio-denied', { userId: targetId });
         break;
       }
 
@@ -229,8 +289,8 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       case 'poll-create': {
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
-        if (!c || !['host', 'presenter'].includes(c.role)) {
-          this.signal.sendDirect(ws, 'error', { message: 'Only host/presenter can create polls' });
+        if (!c || !canPresent(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Only organizer/presenter can create polls' });
           return;
         }
         const p = await this.poll.createPoll(c.roomId, d.question as string, d.options as string[]);
@@ -250,8 +310,8 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       case 'poll-close': {
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
-        if (!c || c.role !== 'host') {
-          this.signal.sendDirect(ws, 'error', { message: 'Only host can close polls' });
+        if (!c || !canModerate(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Only organizer/co-organizer can close polls' });
           return;
         }
         await this.poll.closePoll(d.pollId as string);
@@ -265,7 +325,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         if (!c) return;
         const q = await this.qa.submit(c.roomId, participantId, c.userName, d.text as string);
         this.signal.getRoomClients(c.roomId).forEach((rc) => {
-          if (['host', 'moderator'].includes(rc.role)) {
+          if (canModerate(rc.role)) {
             this.signal.sendTo(rc.participantId, 'question-pending', q);
           }
         });
@@ -276,7 +336,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       case 'question-approve': {
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
-        if (!c || !['host', 'moderator'].includes(c.role)) {
+        if (!c || !canModerate(c.role)) {
           this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
           return;
         }
@@ -288,7 +348,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       case 'question-reject': {
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
-        if (!c || !['host', 'moderator'].includes(c.role)) {
+        if (!c || !canModerate(c.role)) {
           this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
           return;
         }
@@ -300,7 +360,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       case 'question-answer': {
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
-        if (!c || !['host', 'presenter'].includes(c.role)) {
+        if (!c || !canPresent(c.role)) {
           this.signal.sendDirect(ws, 'error', { message: 'Not authorized' });
           return;
         }
@@ -321,8 +381,8 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       case 'admit-participant': {
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
-        if (!c || c.role !== 'host') {
-          this.signal.sendDirect(ws, 'error', { message: 'Only host can admit' });
+        if (!c || !canModerate(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Only organizer can admit' });
           return;
         }
         const targetId = d.userId as string;
