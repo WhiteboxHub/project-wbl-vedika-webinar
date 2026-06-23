@@ -8,7 +8,7 @@ import { promoteParticipant } from '../lib/api';
 import {
   Loader2, Monitor, StopCircle, Square, MessageSquare,
   AlertCircle, Hand, RotateCcw, Users, BarChart2, HelpCircle,
-  Mic, MicOff, ShieldPlus,
+  Mic, MicOff, ShieldPlus, X,
 } from 'lucide-react';
 import PollPanel, { PollData, PollResult } from './classroom/PollPanel';
 import QAPanel, { QuestionData } from './classroom/QAPanel';
@@ -18,6 +18,14 @@ import QAPanel, { QuestionData } from './classroom/QAPanel';
 interface Props { grant: JoinGrant; isHost: boolean; }
 type SideTab = 'chat' | 'participants' | 'polls' | 'qa';
 type AudioState = 'none' | 'pending' | 'approved' | 'denied';
+
+const BLUE   = '#2563eb';
+const RED    = '#ef4444';
+const GREEN  = '#22c55e';
+const AMBER  = '#f59e0b';
+const BG     = 'rgba(6,6,14,0.99)';
+const BORDER = 'rgba(255,255,255,0.08)';
+const SURF   = 'rgba(255,255,255,0.05)';
 
 // ─── Icon Strip ───────────────────────────────────────────────────────────────
 
@@ -39,7 +47,7 @@ function IconStrip({
     <div style={{
       width: 52, flexShrink: 0, display: 'flex', flexDirection: 'column',
       alignItems: 'center', paddingTop: 10, gap: 4,
-      background: 'rgba(6,6,16,0.98)', borderLeft: '1px solid var(--border-color)',
+      background: BG, borderLeft: `1px solid ${BORDER}`,
     }}>
       {STRIP_TABS.map(tab => {
         const isActive = sidebarOpen && activeTab === tab.id;
@@ -52,9 +60,9 @@ function IconStrip({
             onClick={() => onTabClick(tab.id)}
             style={{
               width: 42, height: 42, borderRadius: 10,
-              background: isActive ? 'rgba(124,58,237,0.22)' : 'transparent',
-              border: isActive ? '1px solid rgba(124,58,237,0.45)' : '1px solid transparent',
-              color: isActive ? 'var(--primary-color)' : 'var(--text-muted)',
+              background: isActive ? 'rgba(37,99,235,0.18)' : 'transparent',
+              border: isActive ? `1px solid rgba(37,99,235,0.4)` : '1px solid transparent',
+              color: isActive ? BLUE : 'var(--text-muted)',
               cursor: 'pointer',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
               position: 'relative', transition: 'all 0.15s', outline: 'none',
@@ -64,8 +72,8 @@ function IconStrip({
             <span style={{ fontSize: 9, lineHeight: 1, fontWeight: 600 }}>{tab.label}</span>
             {badge > 0 && (
               <div style={{
-                position: 'absolute', top: 3, right: 3, minWidth: 15, height: 15, borderRadius: 8,
-                background: tab.id === 'participants' ? '#f59e0b' : '#ef4444',
+                position: 'absolute', top: 2, right: 2, minWidth: 14, height: 14, borderRadius: 7,
+                background: tab.id === 'participants' ? AMBER : RED,
                 fontSize: 9, fontWeight: 700, color: '#fff',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
               }}>{badge}</div>
@@ -94,9 +102,9 @@ function ChatPanel({ messages, onSend }: { messages: any[]; onSend: (m: string) 
       <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 7 }}>
         {messages.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', marginTop: 40 }}>No messages yet</p>}
         {messages.map((m, i) => (
-          <div key={m.id || i} style={{ padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.04)' }}>
+          <div key={m.id || i} style={{ padding: '8px 10px', borderRadius: 8, background: SURF }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 2 }}>
-              <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--primary-color)' }}>{m.userName}</span>
+              <span style={{ fontWeight: 700, fontSize: 12, color: BLUE }}>{m.userName}</span>
               <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                 {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
               </span>
@@ -111,7 +119,7 @@ function ChatPanel({ messages, onSend }: { messages: any[]; onSend: (m: string) 
           value={input} onChange={e => setInput(e.target.value)} placeholder="Type a message…"
           style={{ flex: 1, padding: '8px 11px', borderRadius: 8, background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-color)', color: 'var(--text-main)', fontSize: 13, outline: 'none' }}
         />
-        <button type="submit" style={{ padding: '8px 13px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,var(--primary-color),var(--secondary-color))', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Send</button>
+        <button type="submit" style={{ padding: '8px 13px', borderRadius: 8, border: 'none', background: BLUE, color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Send</button>
       </form>
     </div>
   );
@@ -141,8 +149,8 @@ function PeoplePanel({
 
       {/* Audio requests */}
       {canModerate && audioRequests.length > 0 && (
-        <div style={{ marginBottom: 12, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 8, padding: 8 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.07em' }}>🎙 Audio Requests</p>
+        <div style={{ marginBottom: 12, background: 'rgba(245,158,11,0.07)', border: `1px solid rgba(245,158,11,0.22)`, borderRadius: 8, padding: 8 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: AMBER, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Mic Requests ({audioRequests.length})</p>
           {audioRequests.map((req: any) => (
             <div key={req.userId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>{req.userName}</span>
@@ -162,15 +170,22 @@ function PeoplePanel({
         return (
           <div key={p.userId} style={{ padding: 9, borderRadius: 10, marginBottom: 5, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,var(--primary-color),var(--secondary-color))', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+              <div style={{ width: 30, height: 30, borderRadius: '50%',
+                background: BLUE,
+                color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
                 {(p.userName || '?')[0].toUpperCase()}
               </div>
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{p.userName}</span>
-                  {handUp && <span title="Hand raised">✋</span>}
-                  {isMe && <span style={{ fontSize: 9, background: 'rgba(124,58,237,0.2)', color: 'var(--primary-color)', padding: '1px 5px', borderRadius: 8 }}>You</span>}
-                  {isMod && <span style={{ fontSize: 9, background: 'rgba(124,58,237,0.18)', color: 'var(--primary-color)', padding: '1px 5px', borderRadius: 8 }}>Host</span>}
+                  <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{p.userName}</span>
+                  {handUp && <span style={{ fontSize: 10, fontWeight: 600, color: AMBER,
+                    background: 'rgba(245,158,11,0.12)', padding: '1px 5px', borderRadius: 6 }}>Hand Up</span>}
+                  {isMe && <span style={{ fontSize: 9, background: 'rgba(37,99,235,0.18)',
+                    color: BLUE, padding: '1px 5px', borderRadius: 6 }}>You</span>}
+                  {isMod && <span style={{ fontSize: 9, background: 'rgba(37,99,235,0.15)',
+                    color: BLUE, padding: '1px 5px', borderRadius: 6 }}>Host</span>}
                 </div>
                 <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{p.role}</p>
               </div>
@@ -181,7 +196,13 @@ function PeoplePanel({
                   <MicOff size={10} />
                 </button>
                 {isHost && !isMod && (
-                  <button title="Make Co-organizer" disabled={promoting === p.userId} onClick={() => handlePromote(p.userId, 'co_organizer')} style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(124,58,237,0.4)', background: 'rgba(124,58,237,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary-color)', opacity: promoting === p.userId ? 0.5 : 1 }}>
+                  <button title="Make Co-organizer" disabled={promoting === p.userId}
+                  onClick={() => handlePromote(p.userId, 'co_organizer')}
+                  style={{ width: 26, height: 26, borderRadius: 6,
+                    border: `1px solid rgba(37,99,235,0.35)`, background: 'rgba(37,99,235,0.1)',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', color: BLUE,
+                    opacity: promoting === p.userId ? 0.5 : 1 }}>
                     {promoting === p.userId ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} /> : <ShieldPlus size={10} />}
                   </button>
                 )}
@@ -198,9 +219,17 @@ function PeoplePanel({
 
 function SidebarHeader({ label, onClose }: { label: string; onClose: () => void }) {
   return (
-    <div style={{ flexShrink: 0, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)' }}>
-      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
-      <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 2 }}>✕</button>
+    <div style={{ flexShrink: 0, padding: '10px 12px', display: 'flex',
+      alignItems: 'center', justifyContent: 'space-between',
+      borderBottom: `1px solid ${BORDER}` }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)',
+        textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+      <button onClick={onClose}
+        style={{ background: 'none', border: 'none', color: 'var(--text-muted)',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 22, height: 22, borderRadius: 5 }}>
+        <X size={13}/>
+      </button>
     </div>
   );
 }
@@ -483,11 +512,14 @@ export default function NativeClassroomView({ grant, isHost }: Props) {
       )}
 
       {/* Top bar */}
-      <div style={{ flexShrink: 0, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', background: 'rgba(6,6,16,0.98)', borderBottom: '1px solid var(--border-color)' }}>
+      <div style={{ flexShrink: 0, height: 46, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', background: BG, borderBottom: `1px solid ${BORDER}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', animation: 'pulse 2s infinite' }} />
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: GREEN, animation: 'pulse 2s infinite' }}/>
           <span style={{ fontWeight: 700, fontSize: 14 }}>Live Session</span>
-          {isHost && <span style={{ fontSize: 11, background: 'rgba(124,58,237,0.2)', color: 'var(--primary-color)', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>HOST</span>}
+          {isHost && (
+            <span style={{ fontSize: 11, background: 'rgba(37,99,235,0.18)', color: BLUE,
+              padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>HOST</span>
+          )}
           <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>{state}</span>
         </div>
         <div /> {/* spacer */}

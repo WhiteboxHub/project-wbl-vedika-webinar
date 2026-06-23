@@ -11,15 +11,18 @@ import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
 import { GraceService } from './grace.service';
 import { HandsModule } from '../hands/hands.module';
+import { LiveKitModule } from '../livekit/livekit.module';
 import { ChatMessageEntity } from '../database/entities/chat-message.entity';
 import { PollEntity } from '../database/entities/poll.entity';
 import { PollOptionEntity } from '../database/entities/poll-option.entity';
 import { PollVoteEntity } from '../database/entities/poll-vote.entity';
 import { QuestionEntity } from '../database/entities/question.entity';
+import { SessionEntity } from '../database/entities/session.entity';
 
 @Module({
   imports: [
     HandsModule,
+    LiveKitModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (cs: ConfigService) => ({
@@ -34,6 +37,7 @@ import { QuestionEntity } from '../database/entities/question.entity';
       PollOptionEntity,
       PollVoteEntity,
       QuestionEntity,
+      SessionEntity,
     ]),
   ],
   providers: [

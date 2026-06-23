@@ -92,4 +92,23 @@ export class TokenService {
   getRoomServiceClient(): RoomServiceClient {
     return new RoomServiceClient(this.livekitUrl, this.apiKey, this.apiSecret);
   }
+
+  /**
+   * Update a participant's publish permissions at runtime.
+   * Called when the host approves audio for an attendee, or promotes to co-organizer.
+   */
+  async updateParticipantPermissions(
+    roomName: string,
+    identity: string,
+    canPublish: boolean,
+    canPublishSources?: ('camera' | 'microphone' | 'screen_share' | 'screen_share_audio')[],
+  ): Promise<void> {
+    const client = this.getRoomServiceClient();
+    await client.updateParticipant(roomName, identity, undefined, {
+      canPublish,
+      canSubscribe: true,
+      canPublishData: true,
+      ...(canPublishSources ? { canPublishSources } : {}),
+    } as any);
+  }
 }

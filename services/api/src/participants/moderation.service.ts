@@ -45,8 +45,24 @@ export class ModerationService {
     this.signalService.broadcast(sessionId, 'participant-removed', { userId: identity });
   }
 
-  broadcastRoleChanged(sessionId: string, participant: SessionParticipantRecord): void {
+  async broadcastRoleChanged(sessionId: string, participant: SessionParticipantRecord): Promise<void> {
     this.signalService.broadcast(sessionId, 'role-changed', participant);
+
+    // Grant LiveKit publish rights for co-organizers and presenters so they can share screen
+    const promotedRoles = ['co_organizer', 'organizer', 'presenter', 'moderator'];
+    if (promotedRoles.includes(participant.role)) {
+      try {
+        const roomName = await this.getLiveKitRoomName(sessionId);
+        await this.tokenService.updateParticipantPermissions(
+          roomName,
+          participant.userId,
+          true,
+          ['microphone', 'screen_share', 'screen_share_audio'],
+        );
+      } catch {
+        // LiveKit not reachable in dev — screen-share permission UI will still update
+      }
+    }
   }
 
   broadcastAudioApproval(sessionId: string, userId: string, approved: boolean): void {

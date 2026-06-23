@@ -1,39 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+/* ─── Design Tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --bg-color: #050505;
-  --surface-color: rgba(23, 23, 23, 0.6);
-  --surface-hover: rgba(38, 38, 38, 0.8);
-  --primary-color: #7c3aed;
-  --primary-hover: #6d28d9;
-  --secondary-color: #06b6d4;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --border-color: rgba(255, 255, 255, 0.1);
-  --error-color: #ef4444;
-  --success-color: #10b981;
+  --bg-color:       #0d0d12;
+  --surface-color:  rgba(20, 20, 30, 0.85);
+  --surface-hover:  rgba(30, 30, 44, 0.9);
+
+  /* Classic professional blue */
+  --primary-color:  #2563eb;
+  --primary-hover:  #1d4ed8;
+  --secondary-color:#3b82f6;
+
+  --text-main:      #e8eaf0;
+  --text-muted:     #7c8799;
+
+  --border-color:   rgba(255, 255, 255, 0.08);
+  --border-strong:  rgba(255, 255, 255, 0.14);
+
+  --error-color:    #ef4444;
+  --success-color:  #22c55e;
+  --warning-color:  #f59e0b;
 }
 
-/* Animated background orb */
-.bg-orb {
-  position: fixed;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.3), transparent 70%);
-  animation: orbFloat 8s ease-in-out infinite;
-  pointer-events: none;
-  z-index: 0;
-}
+/* ─── Reset ─────────────────────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-@keyframes orbFloat {
-  0%, 100% { transform: translateY(0px) scale(1); }
-  50% { transform: translateY(-30px) scale(1.05); }
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Suppress decorative orb divs (legacy; suppressed with new theme) */
+.bg-orb { display: none; }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -42,10 +35,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
-  /* subtle gradient background */
-  background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 40%),
-              radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.05), transparent 40%),
-              var(--bg-color);
+  background:
+    radial-gradient(ellipse at 80% 0%, rgba(37,99,235,0.07) 0%, transparent 55%),
+    radial-gradient(ellipse at 10% 100%, rgba(59,130,246,0.04) 0%, transparent 50%),
+    var(--bg-color);
 }
 
 #root {
@@ -55,176 +48,136 @@ body {
   flex-direction: column;
 }
 
-/* Glassmorphism Panel */
+/* ─── Glass Panel ────────────────────────────────────────────────────────────── */
 .glass-panel {
   background: var(--surface-color);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 14px;
   padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* Typography */
-h1, h2, h3 {
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
+/* ─── Typography ─────────────────────────────────────────────────────────────── */
+h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
+.text-muted  { color: var(--text-muted); }
 
-.text-muted {
-  color: var(--text-muted);
-}
-
-/* Buttons */
+/* ─── Buttons ────────────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 24px;
+  padding: 10px 22px;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
   border: none;
-  gap: 8px;
+  gap: 7px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .btn-primary {
-  background-color: var(--primary-color);
-  color: white;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  background: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(37,99,235,0.25);
 }
-
 .btn-primary:hover {
-  background-color: var(--primary-hover);
+  background: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 4px 14px rgba(37,99,235,0.35);
 }
-
-.btn-primary:active {
-  transform: translateY(0);
-}
+.btn-primary:active { transform: translateY(0); }
 
 .btn-secondary {
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-strong);
   color: var(--text-main);
 }
+.btn-secondary:hover { background: var(--surface-hover); }
 
-.btn-secondary:hover {
-  background: var(--surface-hover);
-}
-
-/* Inputs */
+/* ─── Inputs ─────────────────────────────────────────────────────────────────── */
 .input-field {
   width: 100%;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-color);
   color: var(--text-main);
-  padding: 12px 16px;
+  padding: 11px 15px;
   border-radius: 8px;
   font-family: 'Inter', sans-serif;
-  font-size: 15px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  font-size: 14px;
+  transition: border-color 0.18s, box-shadow 0.18s;
   outline: none;
 }
-
 .input-field:focus {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.18);
 }
 
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+/* ─── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes fadeIn    { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+@keyframes pulse     { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.55; transform:scale(1.18); } }
+@keyframes spin      { to { transform:rotate(360deg); } }
+@keyframes recPulse  { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+@keyframes fadeInUp  { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
 
-.fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
-}
+.fade-in { animation: fadeIn 0.35s ease-out forwards; }
 
-/* Flex Utilities */
-.flex-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* ─── Utilities ──────────────────────────────────────────────────────────────── */
+.flex-center { display:flex; align-items:center; justify-content:center; }
+.flex-col    { display:flex; flex-direction:column; }
+.gap-4       { gap:16px; }
+.gap-6       { gap:24px; }
+.mt-4        { margin-top:16px; }
+.mt-6        { margin-top:24px; }
+.mt-8        { margin-top:32px; }
 
-.flex-col {
-  display: flex;
-  flex-direction: column;
-}
+/* ─── LiveKit overrides ──────────────────────────────────────────────────────── */
+.lk-room-container { background-color: transparent !important; }
 
-.gap-4 { gap: 16px; }
-.gap-6 { gap: 24px; }
-.mt-4 { margin-top: 16px; }
-.mt-6 { margin-top: 24px; }
-.mt-8 { margin-top: 32px; }
+/* Hide LiveKit's built-in device picker dropdown entirely — we use a custom button */
+.lk-media-device-select,
+.lk-button-group-menu,
+[data-lk-menu],
+.lk-button + .lk-button-group-menu { display: none !important; }
 
-/* Overriding LiveKit Styles if needed to match theme */
-.lk-room-container {
-  background-color: transparent !important;
-}
-
-/* ─── Speaking glow indicator ─────────────────────────────────────────────── */
+/* ─── Speaking glow indicator ────────────────────────────────────────────────── */
 @keyframes speaking-glow {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(16,185,129,0.45); }
-  50%       { box-shadow: 0 0 0 4px rgba(16,185,129,0.75), 0 0 20px rgba(16,185,129,0.2); }
+  0%,100% { box-shadow:0 0 0 2px rgba(34,197,94,0.45); }
+  50%     { box-shadow:0 0 0 4px rgba(34,197,94,0.75), 0 0 20px rgba(34,197,94,0.18); }
 }
 .speaking-indicator {
   animation: speaking-glow 1s ease-in-out infinite;
-  border: 2px solid rgba(16,185,129,0.6) !important;
+  border: 2px solid rgba(34,197,94,0.6) !important;
 }
 
-/* ─── Network quality ─────────────────────────────────────────────────────── */
-.quality-excellent { color: #10b981; }
-.quality-good      { color: #f59e0b; }
-.quality-poor      { color: #ef4444; }
+/* ─── Quality badges ─────────────────────────────────────────────────────────── */
+.quality-excellent { color:#22c55e; }
+.quality-good      { color:#f59e0b; }
+.quality-poor      { color:#ef4444; }
 
-/* ─── Recording status badges ─────────────────────────────────────────────── */
+/* ─── Recording badge ────────────────────────────────────────────────────────── */
 .recording-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 700;
+  display:inline-flex; align-items:center; gap:6px;
+  padding:3px 10px; border-radius:20px;
+  font-size:11px; font-weight:700; letter-spacing:0.05em;
 }
 .recording-badge.recording {
-  background: rgba(239,68,68,0.18);
-  color: #ef4444;
-  border: 1px solid rgba(239,68,68,0.38);
+  background:rgba(239,68,68,0.14);
+  color:#ef4444;
+  border:1px solid rgba(239,68,68,0.35);
 }
 .recording-badge.recording::before {
-  content: '';
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #ef4444;
-  animation: pulse 1s ease-in-out infinite;
-}
-.recording-badge.processing {
-  background: rgba(245,158,11,0.14);
-  color: #f59e0b;
-  border: 1px solid rgba(245,158,11,0.3);
-}
-.recording-badge.ready {
-  background: rgba(16,185,129,0.14);
-  color: #10b981;
-  border: 1px solid rgba(16,185,129,0.3);
-}
-.recording-badge.failed {
-  background: rgba(239,68,68,0.1);
-  color: #ef4444;
-  border: 1px solid rgba(239,68,68,0.3);
+  content:'';
+  width:6px; height:6px; border-radius:50%;
+  background:#ef4444; animation:recPulse 1.2s ease-in-out infinite;
 }
 
-/* ─── Participant tile speaking border ────────────────────────────────────── */
+/* ─── Participant tile speaking border ───────────────────────────────────────── */
 .lk-participant-tile[data-lk-speaking="true"] {
-  outline: 2px solid rgba(16,185,129,0.6) !important;
-  outline-offset: -2px;
+  outline:2px solid rgba(34,197,94,0.6) !important;
+  outline-offset:-2px;
 }
-

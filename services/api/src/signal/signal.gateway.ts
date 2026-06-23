@@ -1,5 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer, OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Server, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { SignalService } from './signal.service';
@@ -10,6 +12,8 @@ import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
 import { GraceService } from './grace.service';
 import { HandsService } from '../hands/hands.service';
+import { TokenService } from '../livekit/token.service';
+import { SessionEntity } from '../database/entities/session.entity';
 import { ParticipantRole, SessionRole, canModerateSession, normalizeSessionRole } from '@webinar/shared';
 
 function canModerate(role: string): boolean {
@@ -43,7 +47,25 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly reaction: ReactionService,
     private readonly grace: GraceService,
     private readonly hands: HandsService,
+    private readonly tokenService: TokenService,
+    @InjectRepository(SessionEntity)
+    private readonly sessionRepo: Repository<SessionEntity>,
   ) {}
+
+  /** Attempt to update LiveKit publish permissions. Swallows errors so signal flow is unaffected when LiveKit is not reachable. */
+  private async grantLiveKitPublish(
+    roomId: string,
+    identity: string,
+    sources: ('microphone' | 'screen_share' | 'screen_share_audio')[],
+  ): Promise<void> {
+    try {
+      const session = await this.sessionRepo.findOne({ where: { id: roomId } });
+      if (!session) return;
+      await this.tokenService.updateParticipantPermissions(roomId, identity, true, sources);
+    } catch {
+      // LiveKit not reachable in dev — audio approval still works via signal
+    }
+  }
 
   afterInit() {
     this.logger.log('Signal Gateway ready at ws://.../signal');
@@ -250,6 +272,8 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         const targetId = d.userId as string;
         const req = await this.hands.approveAudio(c.roomId, targetId);
         if (req) {
+          // Grant LiveKit mic publish right so setMicrophoneEnabled(true) succeeds
+          await this.grantLiveKitPublish(c.roomId, targetId, ['microphone']);
           this.signal.broadcast(c.roomId, 'audio-approved', { userId: targetId });
           this.signal.sendTo(targetId, 'audio-approved', { userId: targetId, canPublishAudio: true });
         }
