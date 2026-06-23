@@ -391,6 +391,41 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         break;
       }
 
+      /**
+       * force-mute — host/co-organizer mutes or un-mutes an attendee.
+       * Payload: { userId: string; muted: boolean }
+       * Used by the native WebRTC path; LiveKit path uses mutePublishedTrack REST.
+       */
+      case 'force-mute': {
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !canModerate(c.role)) {
+          this.signal.sendDirect(ws, 'error', { message: 'Not authorised to force-mute' });
+          return;
+        }
+        const targetId = d.userId as string;
+        const muted = (d.muted as boolean) ?? true;
+        if (!targetId) return;
+        // Tell the target to mute/unmute their local audio track.
+        this.signal.sendTo(targetId, 'force-muted', { userId: targetId, muted });
+        // Broadcast so every participant's People panel reflects the new state.
+        this.signal.broadcast(c.roomId, 'participant-muted', { userId: targetId, muted });
+        break;
+      }
+
+      /**
+       * recording-status — host broadcasts whether recording is active.
+       * Payload: { isRecording: boolean }
+       * Lets attendees display the REC indicator without polling the REST API.
+       */
+      case 'recording-status': {
+        if (!participantId) return;
+        const c = this.signal.getClient(participantId);
+        if (!c || !canModerate(c.role)) return;
+        this.signal.broadcast(c.roomId, 'recording-status', d, participantId);
+        break;
+      }
+
       default:
         this.logger.debug(`Unknown event: ${msg.event}`);
     }

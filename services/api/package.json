@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "build": "nest build",
+    "predev": "npx kill-port 3000 || true",
     "dev": "nest start --watch",
+    "prestart": "npx kill-port 3000 || true",
     "start": "node dist/main",
     "start:debug": "nest start --debug --watch",
     "migrate": "ts-node scripts/run-migrations.ts",

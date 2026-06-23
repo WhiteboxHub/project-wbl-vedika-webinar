@@ -225,6 +225,20 @@ export class PeerManager {
     }
   }
 
+  /**
+   * Add or replace just the audio track without touching video senders.
+   * Used by the native path when an attendee's audio is approved mid-session.
+   */
+  async addAudioTrack(track: MediaStreamTrack, stream: MediaStream): Promise<void> {
+    if (!this.pc) return;
+    const audioSender = this.pc.getSenders().find(s => s.track?.kind === 'audio');
+    if (audioSender) {
+      await audioSender.replaceTrack(track);
+    } else {
+      this.pc.addTrack(track, stream);
+    }
+  }
+
   close(): void {
     this.localStream?.getTracks().forEach(t => t.stop());
     this.pc?.close();

@@ -285,3 +285,50 @@ export async function removeParticipant(sessionId: string, identity: string): Pr
     headers: authHeaders(),
   });
 }
+
+// ─── Recording ───────────────────────────────────────────────────────────────
+
+export interface RecordingStatusResponse {
+  id: string;
+  status: string;
+  duration?: number;
+  fileSize?: number;
+  downloadUrl?: string;
+}
+
+export async function startRecording(sessionId: string): Promise<RecordingStatusResponse> {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/recording/start`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Failed to start recording');
+  }
+  const body = await res.json();
+  return body.data ?? body;
+}
+
+export async function stopRecording(sessionId: string): Promise<RecordingStatusResponse> {
+  const res = await apiFetch(`${API_BASE}/classes/${sessionId}/recording/stop`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Failed to stop recording');
+  }
+  const body = await res.json();
+  return body.data ?? body;
+}
+
+/** Returns null when no recording exists for the session yet. */
+export async function getRecording(sessionId: string): Promise<RecordingStatusResponse | null> {
+  const res = await fetch(`${API_BASE}/classes/${sessionId}/recording`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) return null;
+  const body = await res.json();
+  return body.data ?? body;
+}

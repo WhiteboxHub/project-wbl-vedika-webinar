@@ -46,6 +46,10 @@ export class SignalingClient {
   public onAudioRequested: ((data: any) => void) | null = null;
   public onAudioApproved: ((data: { userId: string }) => void) | null = null;
   public onAudioDenied: ((data: { userId: string }) => void) | null = null;
+  /** Fired by the server when a host force-mutes/un-mutes this participant (native WebRTC path). */
+  public onForceMuted: ((data: { userId: string; muted: boolean }) => void) | null = null;
+  /** Fired when the host broadcasts recording state so attendees can show a REC badge. */
+  public onRecordingStatus: ((data: { isRecording: boolean }) => void) | null = null;
   /** Fired when the host ends the session server-side. Stop reconnecting; show ended screen. */
   public onSessionEnded: ((data: any) => void) | null = null;
 
@@ -94,6 +98,22 @@ export class SignalingClient {
   answerQuestion(questionId: string, answer: string): void { this.send({ event: 'question-answer', data: { questionId, answer } }); }
   upvoteQuestion(questionId: string): void { this.send({ event: 'question-upvote', data: { questionId } }); }
   admitParticipant(userId: string): void { this.send({ event: 'admit-participant', data: { userId } }); }
+
+  /**
+   * Host/co-organizer: force-mute or un-mute a participant.
+   * Used by the native WebRTC path where LiveKit's mutePublishedTrack is not available.
+   */
+  forceMute(userId: string, muted: boolean): void {
+    this.send({ event: 'force-mute', data: { userId, muted } });
+  }
+
+  /**
+   * Host: broadcast current recording state to all room participants.
+   * Called after start/stop so attendees can display a REC badge.
+   */
+  broadcastRecordingStatus(isRecording: boolean): void {
+    this.send({ event: 'recording-status', data: { isRecording } });
+  }
 
   sendWebRtcOffer(data: { fromParticipantId: string; targetParticipantId: string; sdp: RTCSessionDescriptionInit; connectionEpoch: number }): void {
     this.send({ event: 'webrtc-offer', data: data as unknown as Record<string, unknown> });
@@ -164,6 +184,8 @@ export class SignalingClient {
         case 'audio-requested': this.onAudioRequested?.(d); break;
         case 'audio-approved': this.onAudioApproved?.(d); break;
         case 'audio-denied': this.onAudioDenied?.(d); break;
+        case 'force-muted': this.onForceMuted?.(d); break;
+        case 'recording-status': this.onRecordingStatus?.(d); break;
         case 'session-ended':
           this.shouldReconnect = false;
           this.clearReconnectTimer();

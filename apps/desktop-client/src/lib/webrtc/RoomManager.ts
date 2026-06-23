@@ -23,6 +23,8 @@ export class RoomManager {
   private readonly peers = new Map<string, PeerManager>();
   private aggregateState: PeerState = PeerState.IDLE;
   private screenStream: MediaStream | null = null;
+  private audioStream: MediaStream | null = null;
+  private audioMuted = false;
 
   constructor(private readonly opts: RoomManagerOptions) {
     const { grant } = opts;
@@ -207,6 +209,48 @@ export class RoomManager {
     this.screenStream = null;
   }
 
+  // ─── Audio (attendee microphone) ──────────────────────────────────────────────────────
+
+  /**
+   * Request microphone access and add the audio track to every active peer.
+   * Returns true on success, false if the user denied permissions.
+   */
+  async publishAudio(): Promise<boolean> {
+    if (this.audioStream) return true; // already published
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      this.audioStream = stream;
+      const [audioTrack] = stream.getAudioTracks();
+      if (!audioTrack) return false;
+      for (const peer of this.peers.values()) {
+        await peer.addAudioTrack(audioTrack, stream);
+      }
+      return true;
+    } catch (err) {
+      this.log.warn('publish_audio_failed', { error: String(err) });
+      return false;
+    }
+  }
+
+  /**
+   * Mute or unmute the local audio track in-place (no renegotiation needed).
+   * If `muted` is true the track is silenced; false re-enables it.
+   */
+  muteAudio(muted: boolean): void {
+    this.audioMuted = muted;
+    this.audioStream?.getAudioTracks().forEach(t => { t.enabled = !muted; });
+  }
+
+  /** Stop and discard the local audio stream. */
+  stopAudio(): void {
+    this.audioStream?.getTracks().forEach(t => t.stop());
+    this.audioStream = null;
+    this.audioMuted = false;
+  }
+
+  isAudioMuted(): boolean { return this.audioMuted; }
+  hasAudio(): boolean { return this.audioStream !== null; }
+
   getSignalClient(): SignalingClient { return this.signal; }
   getState(): PeerState { return this.aggregateState; }
 
@@ -214,6 +258,7 @@ export class RoomManager {
     for (const peer of this.peers.values()) peer.close();
     this.peers.clear();
     this.stopScreenShare();
+    this.stopAudio();
     this.signal.leaveRoom();
     this.signal.disconnect();
     this.setAggregateState(PeerState.IDLE);
