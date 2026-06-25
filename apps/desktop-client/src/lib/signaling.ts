@@ -41,7 +41,7 @@ export class SignalingClient {
   public onQuestionUpvoted: ((data: { id: string; upvotes: number }) => void) | null = null;
   public onParticipantAdmitted: ((data: any) => void) | null = null;
   public onRoleChanged: ((data: any) => void) | null = null;
-  public onParticipantMuted: ((data: { userId: string; trackSid: string; muted: boolean }) => void) | null = null;
+  public onParticipantMuted: ((data: { userId: string; trackSid?: string; muted: boolean }) => void) | null = null;
   public onParticipantRemoved: ((data: { userId: string }) => void) | null = null;
   public onAudioRequested: ((data: any) => void) | null = null;
   public onAudioApproved: ((data: { userId: string }) => void) | null = null;
@@ -234,7 +234,7 @@ export class SignalingClient {
 
   private startHeartbeat(): void {
     this.clearHeartbeat();
-    this.heartbeatTimer = setInterval(() => this.send({ event: 'ping', data: { ts: Date.now() } }), 15000);
+    this.heartbeatTimer = setInterval(() => this.send({ event: 'ping', data: { ts: Date.now() } }), 10000);
   }
 
   private clearHeartbeat(): void {

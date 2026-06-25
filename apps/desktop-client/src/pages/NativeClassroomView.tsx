@@ -129,10 +129,11 @@ function ChatPanel({ messages, onSend }: { messages: any[]; onSend: (m: string) 
 
 function PeoplePanel({
   participants, raisedHands, audioRequests, isHost, canModerate,
-  sessionId, myId, onApproveAudio, onDenyAudio, onForceMute, onPromote,
+  sessionId, myId, mutedUsers, onApproveAudio, onDenyAudio, onForceMute, onPromote,
 }: {
   participants: any[]; raisedHands: Set<string>; audioRequests: any[];
   isHost: boolean; canModerate: boolean; sessionId: string; myId: string;
+  mutedUsers: Set<string>;
   onApproveAudio: (uid: string) => void; onDenyAudio: (uid: string) => void;
   onForceMute: (uid: string, muted: boolean) => void; onPromote: (uid: string, role: string) => void;
 }) {
@@ -166,6 +167,7 @@ function PeoplePanel({
       {participants.map((p: any) => {
         const isMe = p.userId === myId;
         const handUp = raisedHands.has(p.userId);
+        const isMuted = mutedUsers.has(p.userId);
         const isMod = p.role === 'host' || p.role === 'organizer' || p.role === 'co_organizer' || p.role === 'moderator';
         return (
           <div key={p.userId} style={{ padding: 9, borderRadius: 10, marginBottom: 5, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -192,8 +194,10 @@ function PeoplePanel({
             </div>
             {canModerate && !isMe && (
               <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-                <button title="Mute/Unmute" onClick={() => onForceMute(p.userId, true)} style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
-                  <MicOff size={10} />
+                <button title={isMuted ? 'Unmute' : 'Mute'}
+                  onClick={() => onForceMute(p.userId, !isMuted)}
+                  style={{ width: 26, height: 26, borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+                  {isMuted ? <Mic size={10} /> : <MicOff size={10} />}
                 </button>
                 {isHost && !isMod && (
                   <button title="Make Co-organizer" disabled={promoting === p.userId}
@@ -269,6 +273,7 @@ export default function NativeClassroomView({ grant, isHost }: Props) {
   const initialAudio: AudioState = isHost ? 'approved' : 'none';
   const [audioState, setAudioState] = useState<AudioState>(initialAudio);
   const [micMuted, setMicMuted]     = useState(false);
+  const [mutedUsers, setMutedUsers] = useState<Set<string>>(new Set());
 
   // Chat
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -312,6 +317,11 @@ export default function NativeClassroomView({ grant, isHost }: Props) {
 
   const handleForceMute = useCallback((uid: string, muted: boolean) => {
     roomRef.current?.getSignalClient().forceMute(uid, muted);
+    setMutedUsers(prev => {
+      const next = new Set(prev);
+      if (muted) next.add(uid); else next.delete(uid);
+      return next;
+    });
   }, []);
 
   // ── Join / setup ──────────────────────────────────────────────────────────
@@ -399,10 +409,22 @@ export default function NativeClassroomView({ grant, isHost }: Props) {
 
       // Force mute from host
       sig.onForceMuted = ({ userId, muted }) => {
+        setMutedUsers(prev => {
+          const next = new Set(prev);
+          if (muted) next.add(userId); else next.delete(userId);
+          return next;
+        });
         if (userId === grant.participantId) {
           rm.muteAudio(muted);
           setMicMuted(muted);
         }
+      };
+      sig.onParticipantMuted = ({ userId, muted }) => {
+        setMutedUsers(prev => {
+          const next = new Set(prev);
+          if (muted ?? true) next.add(userId); else next.delete(userId);
+          return next;
+        });
       };
 
       sig.onRoleChanged = (data: any) => {
@@ -425,6 +447,7 @@ export default function NativeClassroomView({ grant, isHost }: Props) {
 
       roomRef.current = rm;
       await rm.join();
+      if (isHost) void rm.publishAudio();
     }
 
     void start();
@@ -601,7 +624,7 @@ export default function NativeClassroomView({ grant, isHost }: Props) {
                   participants={participants} raisedHands={raisedHands}
                   audioRequests={audioRequests} isHost={isHost}
                   canModerate={canModerate} sessionId={grant.roomId}
-                  myId={grant.participantId}
+                  myId={grant.participantId} mutedUsers={mutedUsers}
                   onApproveAudio={uid => sig?.approveAudio(uid)}
                   onDenyAudio={uid => sig?.denyAudio(uid)}
                   onForceMute={handleForceMute}

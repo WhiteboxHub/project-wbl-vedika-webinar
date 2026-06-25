@@ -3,6 +3,7 @@ import { SignalingClient } from '../signaling';
 import { getSignalServerUrl } from '../classroom-session';
 import { PeerManager, type WebRtcOutbound } from './PeerManager';
 import { RtcLogger } from './RtcLogger';
+import { AUDIO_CAPTURE_CONSTRAINTS } from './audio-constraints';
 
 export interface RoomManagerOptions {
   grant: JoinGrant;
@@ -25,12 +26,17 @@ export class RoomManager {
   private screenStream: MediaStream | null = null;
   private audioStream: MediaStream | null = null;
   private audioMuted = false;
+  private audioRecoveryInFlight = false;
+  private deviceChangeHandler: (() => void) | null = null;
+  private visibilityHandler: (() => void) | null = null;
+  private hasJoinedOnce = false;
 
   constructor(private readonly opts: RoomManagerOptions) {
     const { grant } = opts;
     this.log = new RtcLogger('RoomManager', grant.roomId, grant.participantId);
     this.signal = new SignalingClient(getSignalServerUrl());
     this.wireSignal();
+    this.bindDeviceAndVisibilityHandlers();
   }
 
   private wireSignal(): void {
@@ -44,6 +50,11 @@ export class RoomManager {
         grant.displayName,
         grant.role,
       );
+      if (this.hasJoinedOnce) {
+        this.log.info('signal_reconnected', {});
+        void this.republishLocalMedia();
+      }
+      this.hasJoinedOnce = true;
     };
 
     this.signal.onDisconnected = () => {
@@ -83,6 +94,28 @@ export class RoomManager {
     }
   }
 
+  private bindDeviceAndVisibilityHandlers(): void {
+    this.deviceChangeHandler = () => {
+      if (this.audioStream) void this.recoverAudio('devicechange');
+    };
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') void this.republishLocalMedia();
+    };
+    navigator.mediaDevices?.addEventListener('devicechange', this.deviceChangeHandler);
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  private unbindDeviceAndVisibilityHandlers(): void {
+    if (this.deviceChangeHandler) {
+      navigator.mediaDevices?.removeEventListener('devicechange', this.deviceChangeHandler);
+      this.deviceChangeHandler = null;
+    }
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+  }
+
   private setAggregateState(state: PeerState) {
     this.aggregateState = state;
     this.opts.onStateChange?.(state);
@@ -119,9 +152,21 @@ export class RoomManager {
       },
       onRemoteStream: (stream) => this.opts.onRemoteStream?.(stream, remoteId),
       onSendSignal: (m) => this.sendWebRtc(m),
+      onIceRestarted: () => void this.republishLocalMedia(),
     });
     this.peers.set(remoteId, peer);
     return peer;
+  }
+
+  /** Attach screen-share and mic tracks to a peer after connect. */
+  private async attachLocalMedia(peer: PeerManager): Promise<void> {
+    if (this.screenStream) await peer.replaceTracks(this.screenStream);
+    if (this.audioStream) {
+      const [track] = this.audioStream.getAudioTracks();
+      if (track?.readyState === 'live') {
+        await peer.addAudioTrack(track, this.audioStream);
+      }
+    }
   }
 
   /** Host: create peer connection to a specific attendee */
@@ -133,6 +178,7 @@ export class RoomManager {
     if (this.peers.has(attendeeId)) return;
     const peer = this.createPeer(attendeeId, true);
     await peer.connect(this.screenStream ?? undefined);
+    await this.attachLocalMedia(peer);
   }
 
   private async handleOffer(payload: {
@@ -145,6 +191,7 @@ export class RoomManager {
     if (!peer) {
       peer = this.createPeer(payload.fromParticipantId, false);
       await peer.connect();
+      await this.attachLocalMedia(peer);
     }
     await peer.handleOffer(payload.sdp, payload.connectionEpoch);
   }
@@ -211,17 +258,74 @@ export class RoomManager {
 
   // ─── Audio (attendee microphone) ──────────────────────────────────────────────────────
 
+  private bindAudioTrackHealth(track: MediaStreamTrack): void {
+    track.onended = () => void this.recoverAudio('ended');
+    track.onmute = () => {
+      if (track.readyState !== 'live') void this.recoverAudio('mute_dead');
+    };
+    track.onunmute = () => {
+      if (this.audioMuted) track.enabled = false;
+    };
+  }
+
+  private async recoverAudio(reason: string): Promise<void> {
+    if (this.audioRecoveryInFlight) return;
+    this.audioRecoveryInFlight = true;
+    try {
+      this.log.warn('audio_recover', { reason });
+      const wasMuted = this.audioMuted;
+      this.stopAudio();
+      const ok = await this.publishAudio();
+      if (ok && wasMuted) this.muteAudio(true);
+    } finally {
+      this.audioRecoveryInFlight = false;
+    }
+  }
+
+  /**
+   * Re-attach live local tracks to every active peer (after ICE restart or signal reconnect).
+   */
+  async republishLocalMedia(): Promise<void> {
+    if (this.audioStream) {
+      const [track] = this.audioStream.getAudioTracks();
+      if (!track || track.readyState !== 'live') {
+        await this.recoverAudio('republish_stale');
+        return;
+      }
+      for (const peer of this.peers.values()) {
+        await peer.addAudioTrack(track, this.audioStream);
+      }
+    }
+    if (this.screenStream && this.opts.isHost) {
+      for (const peer of this.peers.values()) {
+        await peer.replaceTracks(this.screenStream);
+      }
+    }
+  }
+
   /**
    * Request microphone access and add the audio track to every active peer.
    * Returns true on success, false if the user denied permissions.
    */
   async publishAudio(): Promise<boolean> {
-    if (this.audioStream) return true; // already published
+    if (this.audioStream) {
+      const [existing] = this.audioStream.getAudioTracks();
+      if (existing?.readyState === 'live') {
+        await this.republishLocalMedia();
+        return true;
+      }
+      this.stopAudio();
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: AUDIO_CAPTURE_CONSTRAINTS,
+        video: false,
+      });
       this.audioStream = stream;
       const [audioTrack] = stream.getAudioTracks();
       if (!audioTrack) return false;
+      this.bindAudioTrackHealth(audioTrack);
+      if (this.audioMuted) audioTrack.enabled = false;
       for (const peer of this.peers.values()) {
         await peer.addAudioTrack(audioTrack, stream);
       }
@@ -243,7 +347,12 @@ export class RoomManager {
 
   /** Stop and discard the local audio stream. */
   stopAudio(): void {
-    this.audioStream?.getTracks().forEach(t => t.stop());
+    this.audioStream?.getTracks().forEach(t => {
+      t.onended = null;
+      t.onmute = null;
+      t.onunmute = null;
+      t.stop();
+    });
     this.audioStream = null;
     this.audioMuted = false;
   }
@@ -259,6 +368,7 @@ export class RoomManager {
     this.peers.clear();
     this.stopScreenShare();
     this.stopAudio();
+    this.unbindDeviceAndVisibilityHandlers();
     this.signal.leaveRoom();
     this.signal.disconnect();
     this.setAggregateState(PeerState.IDLE);

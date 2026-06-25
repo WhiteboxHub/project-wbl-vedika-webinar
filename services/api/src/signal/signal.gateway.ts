@@ -13,6 +13,7 @@ import { ReactionService } from './reaction.service';
 import { GraceService } from './grace.service';
 import { HandsService } from '../hands/hands.service';
 import { TokenService } from '../livekit/token.service';
+import { EventRateLimitService } from './event-rate-limit.service';
 import { SessionEntity } from '../database/entities/session.entity';
 import { ParticipantRole, SessionRole, canModerateSession, normalizeSessionRole } from '@webinar/shared';
 
@@ -48,6 +49,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly grace: GraceService,
     private readonly hands: HandsService,
     private readonly tokenService: TokenService,
+    private readonly eventRateLimit: EventRateLimitService,
     @InjectRepository(SessionEntity)
     private readonly sessionRepo: Repository<SessionEntity>,
   ) {}
@@ -221,6 +223,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         if (!participantId) return;
         const client = this.signal.getClient(participantId);
         if (!client) return;
+        if (this.eventRateLimit.isLimited(`chat:${participantId}`, 300)) return;
         const message = ((d.message as string) || '').trim();
         if (!message) return;
         const saved = await this.chat.save(client.roomId, participantId, client.userName, message);
@@ -234,6 +237,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
         if (!c) return;
+        if (this.eventRateLimit.isLimited(`hand:${participantId}`, 2000)) return;
         const entry = await this.hands.raiseHand(c.roomId, participantId, c.userName);
         this.signal.broadcast(c.roomId, 'hand-raised', { ...entry, raised: true });
         break;
@@ -326,6 +330,7 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         if (!participantId) return;
         const c = this.signal.getClient(participantId);
         if (!c) return;
+        if (this.eventRateLimit.isLimited(`poll:${participantId}`, 1000)) return;
         const result = await this.poll.submitVote(d.pollId as string, d.optionId as string, participantId);
         this.signal.broadcast(c.roomId, 'poll-result', result);
         break;

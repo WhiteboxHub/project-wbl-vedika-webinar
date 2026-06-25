@@ -10,6 +10,7 @@ import { PollService } from './poll.service';
 import { QAService } from './qa.service';
 import { ReactionService } from './reaction.service';
 import { GraceService } from './grace.service';
+import { EventRateLimitService } from './event-rate-limit.service';
 import { HandsModule } from '../hands/hands.module';
 import { LiveKitModule } from '../livekit/livekit.module';
 import { ChatMessageEntity } from '../database/entities/chat-message.entity';
@@ -49,6 +50,7 @@ import { SessionEntity } from '../database/entities/session.entity';
     QAService,
     ReactionService,
     GraceService,
+    EventRateLimitService,
   ],
   exports: [SignalGateway, SignalService, PresenceService, ChatService, PollService, QAService, GraceService],
 })

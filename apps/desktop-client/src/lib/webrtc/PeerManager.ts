@@ -17,6 +17,8 @@ export interface PeerManagerOptions {
   onStateChange?: (state: PeerState) => void;
   onRemoteStream?: (stream: MediaStream) => void;
   onSendSignal: (msg: WebRtcOutbound) => void;
+  /** Called after a local ICE restart offer is sent — re-attach media tracks. */
+  onIceRestarted?: () => void;
 }
 
 /**
@@ -36,6 +38,7 @@ export class PeerManager {
    * description is already set and candidates can be applied immediately.
    */
   private iceCandidateBuffer: RTCIceCandidateInit[] | null = [];
+  private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: PeerManagerOptions) {
     this.log = new RtcLogger('PeerManager', opts.roomId, opts.participantId);
@@ -84,6 +87,7 @@ export class PeerManager {
       const ice = this.pc?.iceConnectionState;
       this.log.debug('ice_state', { ice });
       if (ice === 'connected' || ice === 'completed') {
+        this.clearDisconnectTimer();
         this.transition(PeerState.ICE_CONNECTED, ice);
       } else if (ice === 'failed') {
         this.log.warn('ice_failed', {}, PeerState.RECONNECTING);
@@ -91,6 +95,21 @@ export class PeerManager {
         void this.restartIce();
       } else if (ice === 'disconnected') {
         this.log.warn('ice_disconnected', {});
+        this.scheduleDisconnectRecovery();
+      }
+    };
+
+    this.pc.onconnectionstatechange = () => {
+      const cs = this.pc?.connectionState;
+      this.log.debug('connection_state', { cs });
+      if (cs === 'connected') {
+        this.clearDisconnectTimer();
+      } else if (cs === 'failed' || cs === 'closed') {
+        this.log.warn('connection_failed', { cs }, PeerState.RECONNECTING);
+        this.transition(PeerState.RECONNECTING, `connection_${cs}`);
+        if (cs === 'failed') void this.restartIce();
+      } else if (cs === 'disconnected') {
+        this.scheduleDisconnectRecovery();
       }
     };
 
@@ -198,6 +217,27 @@ export class PeerManager {
     this.transition(PeerState.RECONNECTING, 'remote_restart');
   }
 
+  private clearDisconnectTimer(): void {
+    if (this.disconnectTimer !== null) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+  }
+
+  /** Wait briefly — transient disconnects often recover without an ICE restart. */
+  private scheduleDisconnectRecovery(): void {
+    this.clearDisconnectTimer();
+    this.disconnectTimer = setTimeout(() => {
+      const ice = this.pc?.iceConnectionState;
+      const cs = this.pc?.connectionState;
+      if (!this.pc) return;
+      if (ice === 'disconnected' || ice === 'failed' || cs === 'disconnected' || cs === 'failed') {
+        this.log.warn('disconnect_recovery', { ice, cs });
+        void this.restartIce();
+      }
+    }, 3000);
+  }
+
   async restartIce(): Promise<void> {
     if (!this.pc) return;
     this.connectionEpoch += 1;
@@ -213,6 +253,7 @@ export class PeerManager {
       targetParticipantId: this.opts.remoteParticipantId,
       sdp: offer,
     });
+    this.opts.onIceRestarted?.();
   }
 
   async replaceTracks(stream: MediaStream): Promise<void> {
@@ -240,6 +281,7 @@ export class PeerManager {
   }
 
   close(): void {
+    this.clearDisconnectTimer();
     this.localStream?.getTracks().forEach(t => t.stop());
     this.pc?.close();
     this.pc = null;

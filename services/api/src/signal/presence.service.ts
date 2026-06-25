@@ -7,7 +7,7 @@ import { PresenceData, ParticipantRole } from '@webinar/shared';
 export class PresenceService implements OnModuleDestroy {
   private readonly logger = new Logger(PresenceService.name);
   private readonly redis: Redis;
-  private readonly TTL = 45; // seconds
+  private readonly TTL = 30; // seconds — 3× the 10s client ping interval
 
   constructor(private readonly configService: ConfigService) {
     const redisUrl = this.configService.get<string>('REDIS_URL', 'redis://localhost:6379');

@@ -43,7 +43,7 @@ import {
   ShieldPlus, Video, X, PhoneOff, MonitorOff,
 } from 'lucide-react';
 import {
-  removeParticipant, promoteParticipant,
+  removeParticipant, promoteParticipant, muteParticipant,
 } from '../lib/api';
 import {
   loadClassroomSession, clearClassroomSession,
@@ -55,6 +55,7 @@ import { SignalingClient, ReactionType } from '../lib/signaling';
 import PollPanel, { PollData, PollResult } from './classroom/PollPanel';
 import QAPanel, { QuestionData } from './classroom/QAPanel';
 import ReactionBar from './classroom/ReactionBar';
+import { LIVEKIT_MIC_OPTIONS } from '../lib/webrtc/audio-constraints';
 
 const USE_NATIVE_WEBRTC = (import.meta as any).env?.VITE_USE_NATIVE_WEBRTC === 'true';
 
@@ -100,6 +101,9 @@ interface SigCtx {
   unreadChat:       number;
   myHandRaised:     boolean;
   audioState:       AudioSt;
+  micEnableNonce:   number;
+  serverMuteNonce:  number;
+  serverMuted:      boolean;
   myRole:           MyRole;
   myId:             string;
   sessionId:        string;
@@ -191,6 +195,35 @@ function useRecording(onStatus: (r: boolean) => void) {
 function ClassroomInner(ctx: SigCtx) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const connectionState = useConnectionState();
+  const [micError, setMicError] = useState<string | null>(null);
+
+  // Auto-enable mic when host approves or role is promoted
+  useEffect(() => {
+    if (ctx.micEnableNonce === 0) return;
+    if (ctx.audioState !== 'approved') return;
+    void localParticipant.setMicrophoneEnabled(true, LIVEKIT_MIC_OPTIONS as any).catch((e: any) => {
+      const name = (e?.name ?? '').toLowerCase();
+      setMicError(
+        name === 'notallowederror'
+          ? 'Microphone access denied — allow it in your browser and try again.'
+          : `Microphone error: ${e?.message ?? 'unknown'}`,
+      );
+    });
+  }, [ctx.micEnableNonce, ctx.audioState, localParticipant]);
+
+  // Apply server-authoritative mute from host (LiveKit REST or signal broadcast)
+  useEffect(() => {
+    if (ctx.serverMuteNonce === 0) return;
+    void localParticipant.setMicrophoneEnabled(!ctx.serverMuted, LIVEKIT_MIC_OPTIONS as any).catch(() => {});
+  }, [ctx.serverMuteNonce, ctx.serverMuted, localParticipant]);
+
+  // Re-publish mic after LiveKit reconnects
+  useEffect(() => {
+    if (connectionState !== ConnectionState.Connected) return;
+    if (ctx.audioState !== 'approved' && !ctx.isHost) return;
+    if (!isMicrophoneEnabled) return;
+    void localParticipant.setMicrophoneEnabled(true, LIVEKIT_MIC_OPTIONS as any).catch(() => {});
+  }, [connectionState]);
 
   const screenTracks = useTracks(
     [{ source: Track.Source.ScreenShare, withPlaceholder: false }],
@@ -209,11 +242,24 @@ function ClassroomInner(ctx: SigCtx) {
                    || connectionState === ConnectionState.Reconnecting;
 
   // ── Mic toggle ─────────────────────────────────────────────────────────────
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  // Auto-dismiss error toasts after 5 s
+  useEffect(() => { if (micError) { const t = setTimeout(() => setMicError(null), 5000); return () => clearTimeout(t); } }, [micError]);
+  useEffect(() => { if (shareError) { const t = setTimeout(() => setShareError(null), 5000); return () => clearTimeout(t); } }, [shareError]);
+
   const toggleMic = useCallback(async () => {
     try {
-      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
-    } catch (e) {
-      console.warn('[mic] toggle failed', e);
+      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, LIVEKIT_MIC_OPTIONS as any);
+    } catch (e: any) {
+      const name = (e?.name ?? '').toLowerCase();
+      setMicError(
+        name === 'notallowederror'
+          ? 'Microphone access denied — allow it in your browser and try again.'
+          : name === 'notfounderror'
+          ? 'No microphone found. Plug one in and try again.'
+          : `Microphone error: ${e?.message ?? 'unknown'}`,
+      );
     }
   }, [localParticipant, isMicrophoneEnabled]);
 
@@ -228,13 +274,19 @@ function ClassroomInner(ctx: SigCtx) {
         await localParticipant.setScreenShareEnabled(false);
       } else {
         await localParticipant.setScreenShareEnabled(true, {
-          resolution: ScreenSharePresets.h1080fps30,
+          resolution: ScreenSharePresets.h1080fps30,  // highest preset this SDK version supports
           audio: true,
-        });
+        } as any);
       }
     } catch (err: any) {
-      if (err?.name !== 'NotAllowedError') {
-        console.error('[screenshare] failed', err);
+      const name = (err?.name ?? '').toLowerCase();
+      const msg  = (err?.message ?? '').toLowerCase();
+      if (name === 'notallowederror') {
+        // User clicked Cancel in the picker — silent, that's fine
+      } else if (msg.includes('permission') || msg.includes('not allowed') || msg.includes('canpublish')) {
+        setShareError('Screen share permission not yet active. Wait a moment after promotion and try again.');
+      } else {
+        setShareError(`Screen share failed: ${err?.message ?? 'unknown error'}`);
       }
     } finally {
       setShareLoading(false);
@@ -350,6 +402,40 @@ function ClassroomInner(ctx: SigCtx) {
             </div>
           )}
 
+          {/* Mic error toast */}
+          {micError && (
+            <div style={{ position: 'absolute', bottom: 14, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 20, maxWidth: 360, width: 'max-content',
+              background: 'rgba(12,10,22,0.97)', border: `1px solid rgba(239,68,68,0.38)`,
+              borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 9, alignItems: 'center',
+              boxShadow: '0 6px 24px rgba(0,0,0,0.5)', animation: 'fadeUp 0.2s ease' }}>
+              <MicOff size={14} color={RED} style={{ flexShrink: 0 }}/>
+              <p style={{ fontSize: 12, color: '#f1c0c0', fontWeight: 500, lineHeight: 1.4 }}>{micError}</p>
+              <button onClick={() => setMicError(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)',
+                  cursor: 'pointer', marginLeft: 4, display: 'flex', alignItems: 'center' }}>
+                <X size={11}/>
+              </button>
+            </div>
+          )}
+
+          {/* Screen-share error toast */}
+          {shareError && (
+            <div style={{ position: 'absolute', bottom: 14, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 20, maxWidth: 380, width: 'max-content',
+              background: 'rgba(12,10,22,0.97)', border: `1px solid rgba(245,158,11,0.38)`,
+              borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 9, alignItems: 'center',
+              boxShadow: '0 6px 24px rgba(0,0,0,0.5)', animation: 'fadeUp 0.2s ease' }}>
+              <Monitor size={14} color={AMBER} style={{ flexShrink: 0 }}/>
+              <p style={{ fontSize: 12, color: '#fde68a', fontWeight: 500, lineHeight: 1.4 }}>{shareError}</p>
+              <button onClick={() => setShareError(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)',
+                  cursor: 'pointer', marginLeft: 4, display: 'flex', alignItems: 'center' }}>
+                <X size={11}/>
+              </button>
+            </div>
+          )}
+
           {/* Reconnecting overlay */}
           {ctx.connStatus === 'reconnecting' && (
             <div style={{ position: 'absolute', inset: 0, zIndex: 20,
@@ -384,14 +470,14 @@ function ClassroomInner(ctx: SigCtx) {
           )}
 
           {/* Mic approved toast */}
-          {ctx.audioState === 'approved' && !ctx.isHost && (
+          {ctx.audioState === 'approved' && !ctx.isHost && !isMicrophoneEnabled && (
             <div style={{ position: 'absolute', bottom: 14, right: 14, zIndex: 15, maxWidth: 260,
               background: 'rgba(22,163,74,0.1)', border: `1px solid rgba(34,197,94,0.35)`,
               borderRadius: 10, padding: '10px 14px', display: 'flex', gap: 8, alignItems: 'center',
               animation: 'fadeUp 0.2s ease' }}>
               <Mic size={14} color={GREEN} style={{ flexShrink: 0 }}/>
               <p style={{ fontSize: 12, color: GREEN, fontWeight: 600, lineHeight: 1.3 }}>
-                Mic approved — click Unmute to speak.
+                Mic approved — enabling microphone…
               </p>
             </div>
           )}
@@ -669,11 +755,25 @@ function PeoplePanel({
 }) {
   const participants = useParticipants();
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [muting, setMuting] = useState<string | null>(null);
   const canMod = canModRole(myRole);
 
   async function handlePromote(uid: string, role: string) {
     setPromoting(uid);
     try { await onPromote(uid, role); } finally { setPromoting(null); }
+  }
+
+  async function handleServerMute(p: ReturnType<typeof useParticipants>[number], muted: boolean) {
+    const micPub = p.getTrackPublication(Track.Source.Microphone);
+    if (!micPub?.trackSid) return;
+    setMuting(p.identity);
+    try {
+      await muteParticipant(sessionId, p.identity, micPub.trackSid, muted);
+    } catch {
+      alert(muted ? 'Failed to mute participant' : 'Failed to unmute participant');
+    } finally {
+      setMuting(null);
+    }
   }
 
   return (
@@ -752,6 +852,24 @@ function PeoplePanel({
             {/* Host controls */}
             {canMod && !isMe && (
               <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                {p.isMicrophoneEnabled && p.getTrackPublication(Track.Source.Microphone)?.trackSid && (
+                  <button title="Mute participant" disabled={muting === p.identity}
+                    onClick={() => void handleServerMute(p, true)}
+                    style={iconBtn(RED, muting === p.identity)}>
+                    {muting === p.identity
+                      ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }}/>
+                      : <MicOff size={10}/>}
+                  </button>
+                )}
+                {!p.isMicrophoneEnabled && p.getTrackPublication(Track.Source.Microphone)?.trackSid && (
+                  <button title="Unmute participant" disabled={muting === p.identity}
+                    onClick={() => void handleServerMute(p, false)}
+                    style={iconBtn(GREEN, muting === p.identity)}>
+                    {muting === p.identity
+                      ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }}/>
+                      : <Mic size={10}/>}
+                  </button>
+                )}
                 {isHost && !isMod && (
                   <button title="Make Co-organizer" disabled={promoting === p.identity}
                     onClick={() => handlePromote(p.identity, 'co_organizer')}
@@ -848,6 +966,9 @@ export default function Classroom() {
   // ── Audio state ───────────────────────────────────────────────────────────
   const [audioState,    setAudioState]    = useState<AudioSt>(isHost ? 'approved' : 'none');
   const [audioRequests, setAudioRequests] = useState<any[]>([]);
+  const [micEnableNonce, setMicEnableNonce]   = useState(0);
+  const [serverMuteNonce, setServerMuteNonce] = useState(0);
+  const [serverMuted, setServerMuted]         = useState(false);
 
   // ── Presence / hands ─────────────────────────────────────────────────────
   const [myHandRaised,     setMyHandRaised]     = useState(false);
@@ -929,12 +1050,21 @@ export default function Classroom() {
       if (canModRole(myRole)) setAudioRequests(prev => [...prev.filter(r => r.userId !== req.userId), req]);
     };
     sig.onAudioApproved = ({ userId }) => {
-      if (userId === myId) setAudioState('approved');
+      if (userId === myId) {
+        setAudioState('approved');
+        setMicEnableNonce(n => n + 1);
+      }
       setAudioRequests(prev => prev.filter(r => r.userId !== userId));
     };
     sig.onAudioDenied = ({ userId }) => {
       if (userId === myId) setAudioState('denied');
       setAudioRequests(prev => prev.filter(r => r.userId !== userId));
+    };
+    sig.onParticipantMuted = ({ userId, muted }) => {
+      if (userId === myId) {
+        setServerMuted(muted ?? true);
+        setServerMuteNonce(n => n + 1);
+      }
     };
     sig.onRoleChanged = (data: any) => {
       if (data?.userId) setParticipantRoles(prev => new Map(prev).set(data.userId, data.role));
@@ -942,6 +1072,7 @@ export default function Classroom() {
         setMyRole(data.role as MyRole);
         if (['co_organizer', 'organizer', 'presenter', 'moderator'].includes(data.role)) {
           setAudioState('approved');
+          setMicEnableNonce(n => n + 1);
         }
       }
     };
@@ -1035,7 +1166,8 @@ export default function Classroom() {
   const ctx: SigCtx = {
     sigRef, chatMessages, reactions, activePoll, pollResult, myVote,
     questions, audioRequests, raisedHands, participantRoles,
-    unreadChat, myHandRaised, audioState, myRole, myId,
+    unreadChat, myHandRaised, audioState, micEnableNonce, serverMuteNonce, serverMuted,
+    myRole, myId,
     sessionId, isHost, isRecording, connStatus, reconnectN,
     sidebarOpen, activeTab, cameraErr,
     onTab, onSendChat, onReact, onRaiseHand, onLowerHand,
@@ -1061,18 +1193,24 @@ export default function Classroom() {
             disconnectOnPageLeave: false,
             publishDefaults: {
               simulcast: true,
-              videoSimulcastLayers: [VideoPresets.h1080, VideoPresets.h720, VideoPresets.h360],
+              // 4K → 1080p → 720p simulcast layers
+              videoSimulcastLayers: [VideoPresets.h2160, VideoPresets.h1080, VideoPresets.h720],
               videoCodec: 'vp9',
               dtx: false,
               stopMicTrackOnMute: false,
+              forceStereo: true,              // stereo mic when browser supports it
+              // Max screen-share bitrate for 4K fidelity
+              screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 15 },
             },
             audioCaptureDefaults: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
+              echoCancellation:  true,
+              noiseSuppression:  true,
+              autoGainControl:   true,
+              sampleRate:        48000,  // CD-quality sample rate
+              channelCount:      2,      // stereo capture
             },
             videoCaptureDefaults: {
-              resolution: VideoPresets.h1080.resolution,
+              resolution: VideoPresets.h2160.resolution,  // 4K camera capture
             },
           }}
           style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}

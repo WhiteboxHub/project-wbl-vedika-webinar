@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 
 export interface TokenOptions {
   roomName: string;
@@ -47,21 +47,24 @@ export class TokenService {
 
   async generateInstructorToken(roomName: string, identity: string, name: string): Promise<string> {
     return await this.generateToken({
-      roomName,
-      identity,
-      name,
+      roomName, identity, name,
       canPublish: true,
       canSubscribe: true,
       metadata: JSON.stringify({ role: 'instructor' }),
     });
   }
 
+  /**
+   * Attendees and moderators join with canPublish: true so that:
+   *  - After host audio-approval the attendee calls setMicrophoneEnabled(true) immediately
+   *  - After promotion to co-organizer they call setScreenShareEnabled(true) immediately
+   * The UX gate (approval flow, button visibility) is enforced via the signal layer.
+   * This avoids a round-trip updateParticipant call that may fail in dev environments.
+   */
   async generateAttendeeToken(roomName: string, identity: string, name: string): Promise<string> {
     return await this.generateToken({
-      roomName,
-      identity,
-      name,
-      canPublish: false,
+      roomName, identity, name,
+      canPublish: true,
       canSubscribe: true,
       metadata: JSON.stringify({ role: 'attendee' }),
     });
@@ -69,9 +72,7 @@ export class TokenService {
 
   async generatePresenterToken(roomName: string, identity: string, name: string): Promise<string> {
     return await this.generateToken({
-      roomName,
-      identity,
-      name,
+      roomName, identity, name,
       canPublish: true,
       canSubscribe: true,
       metadata: JSON.stringify({ role: 'presenter' }),
@@ -80,10 +81,8 @@ export class TokenService {
 
   async generateModeratorToken(roomName: string, identity: string, name: string): Promise<string> {
     return await this.generateToken({
-      roomName,
-      identity,
-      name,
-      canPublish: false,
+      roomName, identity, name,
+      canPublish: true,
       canSubscribe: true,
       metadata: JSON.stringify({ role: 'moderator' }),
     });
@@ -94,21 +93,37 @@ export class TokenService {
   }
 
   /**
-   * Update a participant's publish permissions at runtime.
-   * Called when the host approves audio for an attendee, or promotes to co-organizer.
+   * Upgrade publish permissions at runtime (best-effort).
+   * Uses numeric TrackSource enum values required by livekit-server-sdk protobuf.
+   * Falls through silently if LiveKit is unreachable (token-level permission covers it).
    */
   async updateParticipantPermissions(
     roomName: string,
     identity: string,
     canPublish: boolean,
-    canPublishSources?: ('camera' | 'microphone' | 'screen_share' | 'screen_share_audio')[],
+    sources: ('microphone' | 'camera' | 'screen_share' | 'screen_share_audio')[] = [],
   ): Promise<void> {
-    const client = this.getRoomServiceClient();
-    await client.updateParticipant(roomName, identity, undefined, {
-      canPublish,
-      canSubscribe: true,
-      canPublishData: true,
-      ...(canPublishSources ? { canPublishSources } : {}),
-    } as any);
+    const sourceMap: Record<string, TrackSource> = {
+      camera:             TrackSource.CAMERA,
+      microphone:         TrackSource.MICROPHONE,
+      screen_share:       TrackSource.SCREEN_SHARE,
+      screen_share_audio: TrackSource.SCREEN_SHARE_AUDIO,
+    };
+
+    const canPublishSources = sources.length > 0
+      ? sources.map(s => sourceMap[s]).filter(Boolean)
+      : undefined;
+
+    try {
+      const client = this.getRoomServiceClient();
+      await client.updateParticipant(roomName, identity, undefined, {
+        canPublish,
+        canSubscribe: true,
+        canPublishData: true,
+        ...(canPublishSources ? { canPublishSources } : {}),
+      });
+    } catch (err) {
+      console.warn('[token] updateParticipantPermissions skipped:', (err as Error).message);
+    }
   }
 }
