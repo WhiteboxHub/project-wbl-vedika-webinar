@@ -1,0 +1,32 @@
+{
+  "name": "webinar-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "docker:up": "node scripts/configure-livekit.mjs && docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:configure-livekit": "node scripts/configure-livekit.mjs",
+    "dev:client": "pnpm --filter @webinar/desktop-client dev",
+    "tunnel": "npx cloudflared tunnel --url http://localhost:5173"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"  
+  },
+  "packageManager": "pnpm@9.1.0"
+}
