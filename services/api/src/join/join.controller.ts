@@ -1,6 +1,7 @@
 import { Controller, Post, Body, UseGuards, Param, Get } from '@nestjs/common';
 import { JoinService } from './join.service';
 import { JoinRequestDto } from './dto/join-request.dto';
+import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '@webinar/shared';
@@ -55,8 +56,12 @@ export class JoinController {
   @Post('register/:sessionId')
   async registerForSession(
     @Param('sessionId') sessionId: string,
-    @Body() body: { name: string; email: string },
+    @Body() body: RegisterDto,
   ) {
-    return await this.joinService.registerForSession(sessionId, body.name, body.email);
+    return await this.joinService.registerForSession(
+      sessionId,
+      body.name.trim(),
+      body.email.trim().toLowerCase(),
+    );
   }
 }

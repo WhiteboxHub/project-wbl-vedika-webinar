@@ -234,7 +234,11 @@ export class RoomManager {
   async publishScreenShare(): Promise<boolean> {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 30 },
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
+        },
         audio: true,
       });
       this.screenStream = stream;

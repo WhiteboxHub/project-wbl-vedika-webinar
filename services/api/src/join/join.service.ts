@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -16,6 +16,7 @@ import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class JoinService {
+  private readonly logger = new Logger(JoinService.name);
   private readonly useNativeWebRtc: boolean;
 
   constructor(
@@ -129,13 +130,23 @@ export class JoinService {
       ? `${publicAppUrl}/waiting/${token}`
       : `webinar://join?token=${token}`;
 
-    await this.emailService.sendRegistrationConfirmation(
-      sessionId,
-      user.id,
-      email,
-      session.title,
-      inviteUrl,
-    );
+    try {
+      await this.emailService.sendRegistrationConfirmation(
+        sessionId,
+        user.id,
+        email,
+        {
+          attendeeName: name,
+          sessionTitle: session.title,
+          scheduledAt: session.scheduledAt,
+          instructorName: session.instructor?.name,
+          joinUrl: inviteUrl,
+        },
+      );
+    } catch (emailErr) {
+      // Email delivery failure must NOT block registration — log and continue.
+      this.logger.warn(`Registration confirmation email failed for ${email}: ${(emailErr as Error).message}`);
+    }
 
     return { token, inviteUrl };
   }

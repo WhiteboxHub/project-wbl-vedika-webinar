@@ -1200,7 +1200,7 @@ export default function Classroom() {
               stopMicTrackOnMute: false,
               forceStereo: true,              // stereo mic when browser supports it
               // Max screen-share bitrate for 4K fidelity
-              screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 15 },
+              screenShareEncoding: { maxBitrate: 10_000_000, maxFramerate: 30 },
             },
             audioCaptureDefaults: {
               echoCancellation:  true,
