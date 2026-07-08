@@ -242,6 +242,32 @@ export default function SessionDetail() {
           </div>
         </div>
 
+        {/* ── Permanent Slug URL ────────────────────────────────────────── */}
+        {session.slug && (isScheduled || isLive) && (
+          <div className="glass-panel fade-in" style={{ marginBottom: '16px', border: '1px solid rgba(37,99,235,0.25)', background: 'rgba(37,99,235,0.04)' }}>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Globe size={16} color="var(--primary-color)" /> Permanent Webinar Link
+            </h3>
+            <p className="text-muted" style={{ marginBottom: '16px', fontSize: '13px' }}>
+              Share this link with attendees — it works before, during, and after the session. No expiry.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{
+                flex: 1, padding: '14px 18px',
+                background: 'rgba(37,99,235,0.08)',
+                borderRadius: '10px',
+                border: '1px solid rgba(37,99,235,0.2)',
+                fontSize: '14px', fontWeight: 500, wordBreak: 'break-all', color: 'var(--text-main)',
+              }}>
+                {`${publicOrigin}/w/${session.slug}`}
+              </div>
+              <button className="btn btn-primary" onClick={() => copyLink(`${publicOrigin}/w/${session.slug}`, 'slug')} style={{ whiteSpace: 'nowrap' }}>
+                {copied === 'slug' ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Link</>}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Invite Links ──────────────────────────────────────────────── */}
         {(isScheduled || isLive) && (
           <div className="flex-col gap-4" style={{ marginBottom: '16px' }}>
@@ -311,6 +337,7 @@ export default function SessionDetail() {
             {[
               { label: 'Session ID', value: session.id },
               { label: 'Room Name', value: session.liveKitRoomName },
+              ...(session.slug ? [{ label: 'Slug', value: session.slug }] : []),
               { label: 'Status', value: session.status },
             ].map(row => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-color)' }}>

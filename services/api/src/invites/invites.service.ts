@@ -51,15 +51,24 @@ export class InvitesService {
 
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
     const publicAppUrl = this.configService.get<string>('PUBLIC_APP_URL', '');
-    const inviteUrl = publicAppUrl
-      ? `${publicAppUrl}/waiting/${token}`
-      : `webinar://join?token=${token}`;
+
+    // Prefer slug-based permanent URL when available
+    let inviteUrl: string;
+    if (session.slug) {
+      const base = publicAppUrl || 'http://localhost:5173';
+      inviteUrl = `${base}/w/${session.slug}`;
+    } else if (publicAppUrl) {
+      inviteUrl = `${publicAppUrl}/waiting/${token}`;
+    } else {
+      inviteUrl = `webinar://join?token=${token}`;
+    }
 
     return {
       id: sessionId,
       token,
       expiresAt,
       inviteUrl,
+      slug: session.slug,
     };
   }
 
@@ -112,9 +121,12 @@ export class InvitesService {
 
     return {
       sessionId: session.id,
+      slug: session.slug,
       title: session.title,
       description: session.description,
       scheduledAt: session.scheduledAt,
+      scheduledStartAt: session.scheduledStartAt,
+      scheduledEndAt: session.scheduledEndAt,
       status: session.status,
       instructorName: session.instructor.name,
       maxAttendees: session.maxAttendees,

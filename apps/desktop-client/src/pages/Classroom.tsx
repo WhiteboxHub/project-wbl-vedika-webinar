@@ -47,17 +47,28 @@ import {
 } from '../lib/api';
 import {
   loadClassroomSession, clearClassroomSession,
-  getLiveKitUrl, getSignalServerUrl, type WebinarSessionData,
-  loadWebinarSession,
+  getLiveKitUrl, getSignalServerUrl,
 } from '../lib/classroom-session';
-import NativeClassroomView from './NativeClassroomView';
 import { SignalingClient, ReactionType } from '../lib/signaling';
 import PollPanel, { PollData, PollResult } from './classroom/PollPanel';
 import QAPanel, { QuestionData } from './classroom/QAPanel';
 import ReactionBar from './classroom/ReactionBar';
-import { LIVEKIT_MIC_OPTIONS } from '../lib/webrtc/audio-constraints';
 
-const USE_NATIVE_WEBRTC = (import.meta as any).env?.VITE_USE_NATIVE_WEBRTC === 'true';
+/** Microphone options for LiveKit (inlined from removed webrtc/audio-constraints) */
+const LIVEKIT_MIC_OPTIONS = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  sampleRate: 48000,
+  channelCount: 1,
+};
+
+/** True when the browser allows getUserMedia (https or localhost) */
+const IS_SECURE_CONTEXT = typeof window !== 'undefined' && (
+  window.isSecureContext ||
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -195,12 +206,21 @@ function useRecording(onStatus: (r: boolean) => void) {
 function ClassroomInner(ctx: SigCtx) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const connectionState = useConnectionState();
-  const [micError, setMicError] = useState<string | null>(null);
+  const [micError, setMicError] = useState<React.ReactNode>(null);
 
   // Auto-enable mic when host approves or role is promoted
   useEffect(() => {
     if (ctx.micEnableNonce === 0) return;
     if (ctx.audioState !== 'approved') return;
+    if (!IS_SECURE_CONTEXT) {
+      setMicError(
+        <>
+          Microphone requires a secure context. Use{' '}
+          <a href="http://localhost:5173" style={{ color: '#93c5fd', textDecoration: 'underline' }}>localhost:5173</a>
+        </>
+      );
+      return;
+    }
     void localParticipant.setMicrophoneEnabled(true, LIVEKIT_MIC_OPTIONS as any).catch((e: any) => {
       const name = (e?.name ?? '').toLowerCase();
       setMicError(
@@ -214,6 +234,7 @@ function ClassroomInner(ctx: SigCtx) {
   // Apply server-authoritative mute from host (LiveKit REST or signal broadcast)
   useEffect(() => {
     if (ctx.serverMuteNonce === 0) return;
+    if (!IS_SECURE_CONTEXT) return;
     void localParticipant.setMicrophoneEnabled(!ctx.serverMuted, LIVEKIT_MIC_OPTIONS as any).catch(() => {});
   }, [ctx.serverMuteNonce, ctx.serverMuted, localParticipant]);
 
@@ -222,6 +243,7 @@ function ClassroomInner(ctx: SigCtx) {
     if (connectionState !== ConnectionState.Connected) return;
     if (ctx.audioState !== 'approved' && !ctx.isHost) return;
     if (!isMicrophoneEnabled) return;
+    if (!IS_SECURE_CONTEXT) return;
     void localParticipant.setMicrophoneEnabled(true, LIVEKIT_MIC_OPTIONS as any).catch(() => {});
   }, [connectionState]);
 
@@ -250,6 +272,15 @@ function ClassroomInner(ctx: SigCtx) {
 
   const toggleMic = useCallback(async () => {
     try {
+      if (!IS_SECURE_CONTEXT) {
+        setMicError(
+          <>
+            Microphone requires a secure context. Use{' '}
+            <a href="http://localhost:5173" style={{ color: '#93c5fd', textDecoration: 'underline' }}>localhost:5173</a>
+          </>
+        );
+        return;
+      }
       await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, LIVEKIT_MIC_OPTIONS as any);
     } catch (e: any) {
       const name = (e?.name ?? '').toLowerCase();
@@ -270,6 +301,11 @@ function ClassroomInner(ctx: SigCtx) {
     if (shareLoading) return;
     setShareLoading(true);
     try {
+      if (!IS_SECURE_CONTEXT) {
+        setShareError('Screen sharing requires a secure context. Use http://localhost:5173');
+        setShareLoading(false);
+        return;
+      }
       if (isSharing) {
         await localParticipant.setScreenShareEnabled(false);
       } else {
@@ -921,13 +957,6 @@ export default function Classroom() {
   const location    = useLocation();
   const navigate    = useNavigate();
 
-  // ── Native WebRTC branch ──────────────────────────────────────────────────
-  const nativeSess = USE_NATIVE_WEBRTC
-    ? ((location.state as WebinarSessionData) || (roomId ? loadWebinarSession(roomId) : null))
-    : null;
-  if (USE_NATIVE_WEBRTC && nativeSess?.grant) {
-    return <NativeClassroomView grant={nativeSess.grant} isHost={nativeSess.isHost}/>;
-  }
 
   // ── Session data ──────────────────────────────────────────────────────────
   const sessionData = useMemo(
@@ -1184,7 +1213,7 @@ export default function Classroom() {
       <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: SHELL }}>
         <LiveKitRoom
           token={liveKitToken} serverUrl={livekitUrl}
-          video={false} audio={isHost} connect={true}
+          video={false} audio={isHost && IS_SECURE_CONTEXT} connect={true}
           data-lk-theme="default"
           connectOptions={{ autoSubscribe: true }}
           options={{

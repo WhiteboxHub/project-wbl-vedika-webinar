@@ -13,11 +13,13 @@ import { SignalModule } from './signal/signal.module';
 import { ParticipantsModule } from './participants/participants.module';
 import { HandsModule } from './hands/hands.module';
 import { EmailModule } from './email/email.module';
-import { QaModule } from './qa/qa.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
+import { CacheModule } from './cache/cache.module';
 
 @Module({
   imports: [
     ConfigModule,
+    CacheModule,
     DatabaseModule,
     AuthModule,
     SessionsModule,
@@ -26,7 +28,7 @@ import { QaModule } from './qa/qa.module';
     ParticipantsModule,
     HandsModule,
     EmailModule,
-    QaModule,
+    SchedulingModule,
     BullModule.forRootAsync({
       imports: [NestConfigModule],
       useFactory: async (configService: ConfigService) => ({

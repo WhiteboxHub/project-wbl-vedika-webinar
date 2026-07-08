@@ -74,7 +74,7 @@ export class EmailService {
   }
 
   /** Send email verification link (logs in dev when SMTP not configured) */
-  async sendVerificationEmail(userId: string, email: string): Promise<void> {
+  async sendVerificationEmail(userId: string, email: string, slug?: string): Promise<void> {
     const token = randomBytes(32).toString('hex');
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -84,7 +84,9 @@ export class EmailService {
     );
 
     const baseUrl = this.config.get<string>('PUBLIC_APP_URL', 'http://localhost:5173');
-    const link = `${baseUrl}/verify-email?token=${token}`;
+    const link = slug
+      ? `${baseUrl}/verify-email?token=${token}&slug=${slug}`
+      : `${baseUrl}/verify-email?token=${token}`;
 
     await this.deliver(
       email,
@@ -94,7 +96,7 @@ export class EmailService {
     );
   }
 
-  async verifyEmailToken(token: string): Promise<{ userId: string }> {
+  async verifyEmailToken(token: string): Promise<{ userId: string; name: string; email: string }> {
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const row = await this.verificationRepo.findOne({
       where: { tokenHash },
@@ -106,7 +108,13 @@ export class EmailService {
     row.verifiedAt = new Date();
     await this.verificationRepo.save(row);
     await this.userRepo.update(row.userId, { emailVerified: true });
-    return { userId: row.userId };
+
+    const user = await this.userRepo.findOne({ where: { id: row.userId } });
+    return {
+      userId: row.userId,
+      name: user?.name ?? '',
+      email: user?.email ?? '',
+    };
   }
 
   private formatDateTime(d: Date): string {

@@ -5,7 +5,7 @@ import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '@webinar/shared';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, IsEmail } from 'class-validator';
 
 class HostTokenDto {
   @IsString()
@@ -16,6 +16,24 @@ class DiagnosticsDto {
   @IsOptional()
   @IsString()
   participantId?: string;
+}
+
+class JoinBySlugDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+}
+
+class RegisterBySlugDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 }
 
 @Controller('join')
@@ -41,6 +59,25 @@ export class JoinController {
       roomName: grant.roomId,
     };
   }
+
+  // ─── Slug-based endpoints (permanent URLs) ──────────────────────────────────
+
+  @Get('resolve-slug/:slug')
+  async resolveBySlug(@Param('slug') slug: string) {
+    return await this.joinService.resolveBySlug(slug);
+  }
+
+  @Post('slug/:slug')
+  async joinBySlug(@Param('slug') slug: string, @Body() dto: JoinBySlugDto) {
+    return await this.joinService.joinBySlug(slug, dto.name, dto.email);
+  }
+
+  @Post('register-slug/:slug')
+  async registerBySlug(@Param('slug') slug: string, @Body() dto: RegisterBySlugDto) {
+    return await this.joinService.registerBySlug(slug, dto.name, dto.email);
+  }
+
+  // ─── Legacy endpoints ────────────────────────────────────────────────────────
 
   @Get('ice-servers')
   getPublicIceServers() {

@@ -18,7 +18,8 @@
     "docker:logs": "docker compose logs -f",
     "docker:configure-livekit": "node scripts/configure-livekit.mjs",
     "dev:client": "pnpm --filter @webinar/desktop-client dev",
-    "tunnel": "npx cloudflared tunnel --url http://localhost:5173"
+    "dev:api": "pnpm --filter @webinar/api dev",
+    "startup": "node scripts/startup.mjs"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

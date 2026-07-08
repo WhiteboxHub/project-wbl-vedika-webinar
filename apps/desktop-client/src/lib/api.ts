@@ -70,6 +70,7 @@ async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
 
 export interface Session {
   id: string;
+  slug?: string;
   title: string;
   description?: string;
   status: 'scheduled' | 'live' | 'ended' | 'cancelled';
@@ -86,6 +87,10 @@ export interface CreateSessionPayload {
   title: string;
   description?: string;
   scheduledAt: string;
+  scheduledStartAt?: string;
+  scheduledEndAt?: string;
+  timezone?: string;
+  autoStart?: boolean;
   maxAttendees?: number;
 }
 
@@ -149,6 +154,10 @@ export async function generateInviteLink(sessionId: string): Promise<string> {
     throw new Error(err?.message || 'Failed to generate invite');
   }
   const data = await res.json();
+  // Prefer slug-based URL if available
+  if (data.slug) {
+    return `${window.location.origin}/w/${data.slug}`;
+  }
   const token = data.token;
   return `${window.location.origin}/join/${token}`;
 }
@@ -284,6 +293,65 @@ export async function removeParticipant(sessionId: string, identity: string): Pr
     method: 'DELETE',
     headers: authHeaders(),
   });
+}
+
+// ─── Slug-based API ─────────────────────────────────────────────────────────
+
+export interface SlugResolveResponse {
+  sessionId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  scheduledAt: string;
+  scheduledStartAt?: string;
+  scheduledEndAt?: string;
+  status: 'scheduled' | 'live' | 'ended' | 'cancelled';
+  instructorName: string;
+  maxAttendees: number;
+  registeredName?: string;
+}
+
+export async function resolveSlug(slug: string): Promise<SlugResolveResponse> {
+  const res = await fetch(`${API_BASE}/join/resolve-slug/${slug}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Webinar not found');
+  }
+  return res.json();
+}
+
+export async function joinBySlug(slug: string, name: string, email: string): Promise<JoinTokenResponse> {
+  const res = await fetch(`${API_BASE}/join/slug/${slug}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Failed to join session');
+  }
+  return res.json();
+}
+
+export async function registerBySlug(slug: string, name: string, email: string): Promise<{ registered: boolean; verified: boolean; slug: string }> {
+  const res = await fetch(`${API_BASE}/join/register-slug/${slug}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Failed to register');
+  }
+  return res.json();
+}
+
+export async function getScheduleCalendar(from: string, to: string): Promise<Session[]> {
+  const res = await apiFetch(`${API_BASE}/schedule/calendar?from=${from}&to=${to}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to load schedule');
+  return res.json();
 }
 
 // ─── Recording ───────────────────────────────────────────────────────────────

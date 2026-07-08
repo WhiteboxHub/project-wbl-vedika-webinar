@@ -1,6 +1,8 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { WebSocket } from 'ws';
+import Redis from 'ioredis';
 import type { SignalTokenPayload } from '@webinar/shared';
 
 export interface RoomClient {
@@ -13,13 +15,43 @@ export interface RoomClient {
   jti: string;
 }
 
+/**
+ * SignalService — manages WebSocket clients and room state.
+ *
+ * Hybrid approach: WebSocket references are kept in-memory (they can't be
+ * serialized to Redis), but room membership metadata is mirrored to Redis
+ * so that session restarts can broadcast accurate participant-left events
+ * and future horizontal scaling can use Redis pub/sub for cross-instance
+ * message routing.
+ */
 @Injectable()
-export class SignalService {
+export class SignalService implements OnModuleDestroy {
   private readonly logger = new Logger(SignalService.name);
   private readonly rooms = new Map<string, Set<RoomClient>>();
   private readonly clients = new Map<string, RoomClient>();
+  private readonly redis: Redis;
+  private readonly redisSub: Redis;
+  private readonly redisPub: Redis;
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {
+    const redisUrl = this.configService.get('REDIS_URL', 'redis://localhost:6379');
+    this.redis = new Redis(redisUrl, { maxRetriesPerRequest: 3, lazyConnect: true });
+    this.redisSub = new Redis(redisUrl, { maxRetriesPerRequest: 3, lazyConnect: true });
+    this.redisPub = new Redis(redisUrl, { maxRetriesPerRequest: 3, lazyConnect: true });
+
+    this.redis.connect().catch((err) => this.logger.warn(`Redis connect failed: ${err.message}`));
+    this.redisSub.connect().catch((err) => this.logger.warn(`Redis sub connect failed: ${err.message}`));
+    this.redisPub.connect().catch((err) => this.logger.warn(`Redis pub connect failed: ${err.message}`));
+  }
+
+  async onModuleDestroy() {
+    await this.redis.quit().catch(() => {});
+    await this.redisSub.quit().catch(() => {});
+    await this.redisPub.quit().catch(() => {});
+  }
 
   validateToken(token: string): SignalTokenPayload | null {
     try {
@@ -32,6 +64,7 @@ export class SignalService {
   /**
    * Idempotent join: same participantId replaces stale socket.
    * Rejects room mismatch and duplicate jti on different sockets.
+   * Mirrors membership to Redis for persistence.
    */
   registerClient(
     ws: WebSocket,
@@ -69,6 +102,10 @@ export class SignalService {
     if (!this.rooms.has(roomId)) this.rooms.set(roomId, new Set());
     this.rooms.get(roomId)!.add(client);
     this.logger.log(`[${roomId}] +${userName} (${role}) epoch=${client.connectionEpoch}`);
+
+    // Mirror to Redis (fire-and-forget for performance)
+    this.mirrorToRedis(roomId, payload.sub, userName, role).catch(() => {});
+
     return client;
   }
 
@@ -86,6 +123,9 @@ export class SignalService {
         this.rooms.get(client.roomId)?.delete(client);
       }
       this.logger.log(`[${client.roomId}] -${client.userName}`);
+
+      // Remove from Redis mirror (fire-and-forget)
+      this.removeFromRedis(client.roomId, participantId).catch(() => {});
     }
     return client;
   }
@@ -141,5 +181,24 @@ export class SignalService {
       fromParticipantId,
       targetParticipantId,
     });
+  }
+
+  // ─── Redis mirror helpers ─────────────────────────────────────────────────
+
+  private async mirrorToRedis(roomId: string, participantId: string, userName: string, role: string): Promise<void> {
+    const key = `signal:room:${roomId}`;
+    const value = JSON.stringify({ participantId, userName, role, joinedAt: Date.now() });
+    await this.redis.hset(key, participantId, value);
+    await this.redis.expire(key, 86400); // 24h TTL
+  }
+
+  private async removeFromRedis(roomId: string, participantId: string): Promise<void> {
+    await this.redis.hdel(`signal:room:${roomId}`, participantId);
+  }
+
+  /** Get room membership from Redis (for recovery after restart) */
+  async getRoomMembersFromRedis(roomId: string): Promise<Array<{ participantId: string; userName: string; role: string }>> {
+    const data = await this.redis.hgetall(`signal:room:${roomId}`);
+    return Object.values(data).map((v) => JSON.parse(v));
   }
 }
