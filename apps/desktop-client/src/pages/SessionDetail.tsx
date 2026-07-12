@@ -4,11 +4,43 @@ import { getSession, generateInviteLink, startSession, endSession, getStoredAuth
 import { saveClassroomSession, saveWebinarSession, getLiveKitUrl } from '../lib/classroom-session';
 
 const USE_NATIVE_WEBRTC = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env.VITE_USE_NATIVE_WEBRTC === 'true';
-import { ArrowLeft, Copy, Check, Square, Users, Clock, Radio, Video, Globe, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Square, Users, Clock, Radio, Video, Globe, Loader2 } from 'lucide-react';
 
-// Persist tunnel URL across sessions
-const TUNNEL_KEY = 'webinar_tunnel_url';
+// ─── Public URL hook ─────────────────────────────────────────────────────────
+//
+// The single source of truth for what domain to use in shareable links.
+// Reads from:
+//   1. GET /api/config  → PUBLIC_APP_URL set in the server's .env
+//   2. VITE_PUBLIC_URL  → build-time override
+//   3. window.location.origin → last-resort fallback (works for LAN access)
+//
+// To change the domain for all links, simply update PUBLIC_APP_URL in .env
+// and restart the API. No UI config needed.
 
+function usePublicOrigin() {
+  // Try build-time env var first (fastest, zero network)
+  const buildTimeUrl = (import.meta as any).env?.VITE_PUBLIC_URL as string | undefined;
+
+  const [publicOrigin, setPublicOrigin] = useState<string>(
+    buildTimeUrl?.replace(/\/$/, '') ?? window.location.origin,
+  );
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    // If a build-time URL was provided, use it directly — no API call needed
+    if (buildTimeUrl) { setChecked(true); return; }
+
+    fetch('/api/config')
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { publicUrl: string } | null) => {
+        if (data?.publicUrl) setPublicOrigin(data.publicUrl.replace(/\/$/, ''));
+      })
+      .catch(() => { /* silently fall back to window.location.origin */ })
+      .finally(() => setChecked(true));
+  }, []);
+
+  return { publicOrigin, checked };
+}
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -20,13 +52,8 @@ export default function SessionDetail() {
   const [copied, setCopied] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Tunnel URL management
-  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const [tunnelUrl, setTunnelUrl] = useState<string>(localStorage.getItem(TUNNEL_KEY) || '');
-  const [tunnelInput, setTunnelInput] = useState<string>(localStorage.getItem(TUNNEL_KEY) || '');
-  const [showTunnelInput, setShowTunnelInput] = useState(false);
+  const { publicOrigin } = usePublicOrigin();
 
-  const publicOrigin = tunnelUrl ? tunnelUrl.replace(/\/$/, '') : window.location.origin;
   const registrationLink = `${publicOrigin}/register/${id}`;
 
   useEffect(() => {
@@ -45,20 +72,6 @@ export default function SessionDetail() {
     }
   }
 
-  function saveTunnelUrl() {
-    const cleaned = tunnelInput.trim().replace(/\/$/, '');
-    localStorage.setItem(TUNNEL_KEY, cleaned);
-    setTunnelUrl(cleaned);
-    setShowTunnelInput(false);
-  }
-
-  function clearTunnelUrl() {
-    localStorage.removeItem(TUNNEL_KEY);
-    setTunnelUrl('');
-    setTunnelInput('');
-    setShowTunnelInput(false);
-  }
-
   function copyLink(text: string, key: string) {
     navigator.clipboard.writeText(text);
     setCopied(key);
@@ -70,11 +83,9 @@ export default function SessionDetail() {
     setActionLoading('invite');
     try {
       const rawLink = await generateInviteLink(id);
-      // Replace localhost origin with tunnel URL if set
+      // Replace origin with publicOrigin so the link works from any device
       const url = new URL(rawLink);
-      const link = tunnelUrl
-        ? `${tunnelUrl.replace(/\/$/, '')}${url.pathname}`
-        : rawLink;
+      const link = `${publicOrigin}${url.pathname}`;
       setInviteLink(link);
     } catch (err: any) { alert(err.message); }
     finally { setActionLoading(null); }
@@ -90,17 +101,14 @@ export default function SessionDetail() {
 
   /**
    * Atomically starts the session (if not already live) and joins as host.
-   * This prevents the two-step "Start then Join" confusion.
    */
   async function handleStartAndJoin() {
     if (!id || !session) return;
     setActionLoading('host');
     try {
-      // Start the session if it's still scheduled
       if (session.status === 'scheduled') {
         await startSession(id);
       }
-      // Get a host LiveKit + signal token
       const data = await getHostToken(id);
       const roomId = data.roomId || data.roomName;
 
@@ -138,6 +146,7 @@ export default function SessionDetail() {
 
   const isLive = session.status === 'live';
   const isScheduled = session.status === 'scheduled';
+  const slugLink = session.slug ? `${publicOrigin}/w/${session.slug}` : null;
 
   return (
     <div style={{ minHeight: '100vh', padding: '40px 20px' }}>
@@ -148,59 +157,7 @@ export default function SessionDetail() {
           <ArrowLeft size={16} /> Dashboard
         </button>
 
-        {/* ── Tunnel URL Banner ─────────────────────────────────────────── */}
-        {isLocalhost && (
-          <div style={{
-            marginBottom: '16px', padding: '14px 18px',
-            borderRadius: '12px', border: '1px solid rgba(234,179,8,0.35)',
-            background: 'rgba(234,179,8,0.08)',
-            display: 'flex', alignItems: 'flex-start', gap: '12px',
-          }}>
-            <AlertTriangle size={18} color="#eab308" style={{ flexShrink: 0, marginTop: '1px' }} />
-            <div style={{ flex: 1 }}>
-              <p style={{ fontWeight: 600, fontSize: '13px', color: '#eab308', marginBottom: '4px' }}>
-                You're on localhost — links won't work for attendees
-              </p>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: tunnelUrl ? '8px' : '12px' }}>
-                {tunnelUrl
-                  ? `Using tunnel: ${tunnelUrl}`
-                  : 'Paste your Cloudflare tunnel URL so shareable links point to the right address.'}
-              </p>
-              {showTunnelInput ? (
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <input
-                    className="input-field"
-                    placeholder="https://xxx.trycloudflare.com"
-                    value={tunnelInput}
-                    onChange={e => setTunnelInput(e.target.value)}
-                    style={{ flex: 1, fontSize: '13px', padding: '8px 12px' }}
-                    onKeyDown={e => e.key === 'Enter' && saveTunnelUrl()}
-                    autoFocus
-                  />
-                  <button className="btn btn-primary" onClick={saveTunnelUrl} style={{ padding: '8px 16px', fontSize: '13px' }}>Save</button>
-                  <button className="btn btn-secondary" onClick={() => setShowTunnelInput(false)} style={{ padding: '8px 12px', fontSize: '13px' }}>Cancel</button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => setShowTunnelInput(true)}
-                    style={{ padding: '6px 14px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Globe size={13} /> {tunnelUrl ? 'Change Tunnel URL' : 'Set Tunnel URL'}
-                  </button>
-                  {tunnelUrl && (
-                    <button className="btn btn-secondary" onClick={clearTunnelUrl} style={{ padding: '6px 14px', fontSize: '12px', color: 'var(--error-color)', borderColor: 'rgba(239,68,68,0.3)' }}>
-                      Clear
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Session Header ────────────────────────────────────────────── */}
+        {/* ── Session Header ─────────────────────────────────────────── */}
         <div className="glass-panel fade-in" style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
             <div>
@@ -242,8 +199,8 @@ export default function SessionDetail() {
           </div>
         </div>
 
-        {/* ── Permanent Slug URL ────────────────────────────────────────── */}
-        {session.slug && (isScheduled || isLive) && (
+        {/* ── Permanent Slug URL ─────────────────────────────────────── */}
+        {slugLink && (isScheduled || isLive) && (
           <div className="glass-panel fade-in" style={{ marginBottom: '16px', border: '1px solid rgba(37,99,235,0.25)', background: 'rgba(37,99,235,0.04)' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Globe size={16} color="var(--primary-color)" /> Permanent Webinar Link
@@ -259,16 +216,16 @@ export default function SessionDetail() {
                 border: '1px solid rgba(37,99,235,0.2)',
                 fontSize: '14px', fontWeight: 500, wordBreak: 'break-all', color: 'var(--text-main)',
               }}>
-                {`${publicOrigin}/w/${session.slug}`}
+                {slugLink}
               </div>
-              <button className="btn btn-primary" onClick={() => copyLink(`${publicOrigin}/w/${session.slug}`, 'slug')} style={{ whiteSpace: 'nowrap' }}>
+              <button className="btn btn-primary" onClick={() => copyLink(slugLink, 'slug')} style={{ whiteSpace: 'nowrap' }}>
                 {copied === 'slug' ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Link</>}
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Invite Links ──────────────────────────────────────────────── */}
+        {/* ── Invite Links ───────────────────────────────────────────── */}
         {(isScheduled || isLive) && (
           <div className="flex-col gap-4" style={{ marginBottom: '16px' }}>
 
@@ -284,9 +241,9 @@ export default function SessionDetail() {
               <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{
                   flex: 1, padding: '12px 16px',
-                  background: tunnelUrl ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.05)',
+                  background: 'rgba(255,255,255,0.05)',
                   borderRadius: '10px',
-                  border: `1px solid ${tunnelUrl ? 'rgba(16,185,129,0.25)' : 'var(--border-color)'}`,
+                  border: '1px solid var(--border-color)',
                   fontSize: '13px', wordBreak: 'break-all', color: 'var(--text-main)',
                 }}>
                   {registrationLink}
@@ -295,12 +252,6 @@ export default function SessionDetail() {
                   {copied === 'reg' ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy</>}
                 </button>
               </div>
-
-              {isLocalhost && !tunnelUrl && (
-                <p style={{ marginTop: '10px', fontSize: '12px', color: '#eab308' }}>
-                  ⚠️ Set your tunnel URL above so this link works for attendees outside your machine.
-                </p>
-              )}
             </div>
 
             {/* Direct Join Link */}
@@ -339,6 +290,7 @@ export default function SessionDetail() {
               { label: 'Room Name', value: session.liveKitRoomName },
               ...(session.slug ? [{ label: 'Slug', value: session.slug }] : []),
               { label: 'Status', value: session.status },
+              { label: 'Public Domain', value: publicOrigin },
             ].map(row => (
               <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-color)' }}>
                 <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{row.label}</span>
@@ -346,6 +298,9 @@ export default function SessionDetail() {
               </div>
             ))}
           </div>
+          <p style={{ marginTop: '14px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            To change the public domain for all links, update <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>PUBLIC_APP_URL</code> in your <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '4px' }}>.env</code> and restart the API.
+          </p>
         </div>
       </div>
       <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>

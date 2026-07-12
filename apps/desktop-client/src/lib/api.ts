@@ -1,4 +1,9 @@
+// All REST calls use a same-origin relative URL.
+// In dev:  Vite proxy routes /api/* → NestJS on :3000
+// In prod: Caddy routes /api/* → NestJS on :3000
+// The domain is set once in .env (APP_HOST) — no per-browser config needed.
 const API_BASE = '/api';
+
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 

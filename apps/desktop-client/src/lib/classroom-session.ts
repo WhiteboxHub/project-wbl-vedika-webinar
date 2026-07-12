@@ -19,10 +19,10 @@ export interface WebinarSessionData {
   grant: JoinGrant;
 }
 
-const KEY_PREFIX = 'classroom_session_';
+const KEY_PREFIX    = 'classroom_session_';
 const WEBINAR_PREFIX = 'webinar_session_';
 
-// ─── Legacy LiveKit helpers (kept for backward compat) ─────────────────────
+// ─── Session storage helpers ─────────────────────────────────────────────────
 
 export function saveClassroomSession(roomId: string, data: ClassroomSessionData) {
   try { sessionStorage.setItem(KEY_PREFIX + roomId, JSON.stringify(data)); } catch {}
@@ -34,8 +34,6 @@ export function clearClassroomSession(roomId: string) {
   try { sessionStorage.removeItem(KEY_PREFIX + roomId); } catch {}
 }
 
-// ─── New WebRTC Webinar helpers ────────────────────────────────────────────
-
 export function saveWebinarSession(roomId: string, data: WebinarSessionData) {
   try { sessionStorage.setItem(WEBINAR_PREFIX + roomId, JSON.stringify(data)); } catch {}
 }
@@ -46,45 +44,46 @@ export function clearWebinarSession(roomId: string) {
   try { sessionStorage.removeItem(WEBINAR_PREFIX + roomId); } catch {}
 }
 
+// ─── URL helpers — always same-origin ────────────────────────────────────────
+//
+// The architecture uses a single entry point (Caddy in prod, Vite proxy in dev).
+// All traffic goes to the same origin the page was loaded from:
+//
+//   DEV  (Vite on :5173)       PROD / LAN  (Caddy on :80)
+//   ────────────────────       ──────────────────────────
+//   /api/*    → :3000 NestJS   /api/*    → :3000 NestJS
+//   /signal   → :3000 NestJS   /signal   → :3000 NestJS
+//   /livekit  → :7880 LiveKit  /livekit  → :7880 LiveKit
+//
+// Therefore: always use window.location.origin — no env vars, no config,
+// no hardcoded hostnames. Works identically on localhost, LAN IP, or a domain.
+
 /**
- * Signal server URL — built into the NestJS API at /signal.
- * Uses the current page origin so it works through Cloudflare tunnel automatically.
+ * WebSocket URL for the NestJS signal gateway.
+ * Always resolves to wss?://{current-origin}/signal
  */
 export function getSignalServerUrl(): string {
-  const { origin } = window.location;
-  const wsOrigin = origin.replace(/^https/, 'wss').replace(/^http/, 'ws');
+  const wsOrigin = window.location.origin
+    .replace(/^https/, 'wss')
+    .replace(/^http/,  'ws');
   return `${wsOrigin}/signal`;
 }
 
 /**
- * Returns the LiveKit server URL to pass to <LiveKitRoom serverUrl={...}>.
+ * WebSocket URL for LiveKit SFU.
  *
- * LOCAL DEV  — Use the Vite dev server proxy path (/livekit).
- *   The Vite proxy rewrites ws://localhost:5173/livekit → ws://localhost:7880.
- *   LiveKit ICE uses LIVEKIT_NODE_IP (see docker/livekit.yaml.template).
- *
- * CROSS-DEVICE — Host and attendees must open the SAME origin, e.g. http://192.168.0.60:5173
- *   (not localhost on one side and LAN IP on the other). Set LIVEKIT_NODE_IP in .env and
- *   run `pnpm docker:up` to regenerate LiveKit config.
- *
- * PRODUCTION — Set VITE_LIVEKIT_URL=wss://your-livekit-domain.com in .env.
- *   Or leave empty to use the /livekit proxy path on your own server.
+ * Uses VITE_LIVEKIT_URL if set (for standalone LiveKit Cloud or self-hosted
+ * LiveKit without a reverse proxy). Otherwise uses the same-origin /livekit
+ * path which Caddy / Vite proxy forwards to the LiveKit server.
  */
 export function getLiveKitUrl(): string {
-  // Explicit env override (production / LiveKit Cloud)
-  const envUrl = (import.meta as any).env?.VITE_LIVEKIT_URL;
-  if (envUrl) return envUrl;
+  const explicit = (import.meta as any).env?.VITE_LIVEKIT_URL as string | undefined;
+  if (explicit) return explicit;
 
-  const { hostname, protocol, port } = window.location;
-  const wsProto = protocol === 'https:' ? 'wss:' : 'ws:';
-
-  // Local dev: use the proxy path instead of direct ws://localhost:7880
-  // Vite dev server listens on port 5173 and proxies /livekit → 7880
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    const devPort = port || '5173';
-    return `${wsProto}//${hostname}:${devPort}/livekit`;
-  }
-
-  // Production / tunnel: use the same origin with /livekit proxy path
-  return `${wsProto}//${window.location.host}/livekit`;
+  const wsOrigin = window.location.origin
+    .replace(/^https/, 'wss')
+    .replace(/^http/,  'ws');
+  return `${wsOrigin}/livekit`;
 }
+
+

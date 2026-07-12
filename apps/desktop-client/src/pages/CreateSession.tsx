@@ -108,10 +108,14 @@ export default function CreateSession() {
   const auth = getStoredAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Pre-fill scheduledAt to 1 hour from now so it's never empty on first submit
+  const defaultDateTime = new Date(Date.now() + 60 * 60 * 1000)
+    .toISOString().slice(0, 16);
+
   const [form, setForm] = useState({
     title: '',
     description: '',
-    scheduledAt: '',
+    scheduledAt: defaultDateTime,
     maxAttendees: 100,
     timezone: getBrowserTimezone(),
     durationMinutes: 60,
@@ -165,9 +169,7 @@ export default function CreateSession() {
     }
   };
 
-  // Default scheduledAt to 1 hour from now
-  const defaultDateTime = new Date(Date.now() + 60 * 60 * 1000)
-    .toISOString().slice(0, 16);
+
 
   return (
     <div style={{ minHeight: '100vh', padding: '40px 20px' }}>
@@ -248,7 +250,7 @@ export default function CreateSession() {
                 </label>
                 <input
                   name="scheduledAt" type="datetime-local" className="input-field"
-                  defaultValue={defaultDateTime}
+                  value={form.scheduledAt}
                   onChange={handleChange} required disabled={loading}
                   style={{ colorScheme: 'dark' }}
                 />
