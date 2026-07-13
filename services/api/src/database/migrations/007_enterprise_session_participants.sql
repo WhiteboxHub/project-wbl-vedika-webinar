@@ -1,3 +1,6 @@
+-- Migration 007: Enterprise session participants, email verification, user email_verified column
+-- Fixed: removed broken reference to questions table (created in 010) that caused this entire migration to fail.
+
 -- Session-scoped participant roles and capabilities
 CREATE TABLE IF NOT EXISTS session_participants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -30,6 +33,7 @@ CREATE TABLE IF NOT EXISTS email_verifications (
 
 CREATE INDEX IF NOT EXISTS idx_email_verifications_user ON email_verifications(user_id);
 
+-- email_verified column on users
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
 
 -- Registration confirmation audit
@@ -44,4 +48,5 @@ CREATE TABLE IF NOT EXISTS registration_confirmations (
   UNIQUE (session_id, user_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_questions_session_status ON questions(session_id, status);
+-- NOTE: The index idx_questions_session_status has been moved to migration 010
+-- where the questions table is actually created.

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
 import { Logger } from './common/logger';
+import { runMigrationsOnStartup } from './database/run-migrations';
 import * as os from 'os';
 
 function detectLanIp(): string {
@@ -25,6 +26,13 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const port = configService.get('API_PORT', 3000);
+
+  // Run SQL migrations before accepting traffic.
+  // Uses a dollar-quote-aware parser so PL/pgSQL functions are handled correctly.
+  const databaseUrl = configService.get<string>('DATABASE_URL', '');
+  if (databaseUrl) {
+    await runMigrationsOnStartup(databaseUrl);
+  }
 
   // Enable WebSocket adapter (ws — matches the client's native WebSocket)
   app.useWebSocketAdapter(new WsAdapter(app));

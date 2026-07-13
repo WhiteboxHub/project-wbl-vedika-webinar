@@ -32,9 +32,54 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return res.json();
 }
 
+/** Step 1: Send a magic link to the given email address. */
+export async function requestMagicLink(email: string): Promise<{ message: string; devToken?: string }> {
+  const res = await fetch(`${API_BASE}/auth/magic-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Failed to send magic link');
+  }
+  const body = await res.json();
+  return {
+    message: body?.data?.message ?? 'Check your email or server logs for the link.',
+    devToken: body?.data?.devToken,
+  };
+}
+
+/** Step 2: Exchange the magic-link token for an access token. */
+export async function verifyMagicLink(token: string): Promise<LoginResponse> {
+  const res = await fetch(`${API_BASE}/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message || 'Invalid or expired token');
+  }
+  const body = await res.json();
+  // Response shape: { success: true, data: { accessToken, user } }
+  return body?.data ?? body;
+}
+
+// GAP-13: Use sessionStorage instead of localStorage for JWT tokens.
+// SessionStorage is automatically cleared when the tab/app closes, limiting the
+// window for XSS-based token exfiltration compared to persistent localStorage.
+const AUTH_STORAGE_KEY = 'auth';
+
 export function getStoredAuth(): LoginResponse | null {
   try {
-    const raw = localStorage.getItem('auth');
+    // Migrate any token stored in the old localStorage location (one-time).
+    const legacy = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (legacy) {
+      sessionStorage.setItem(AUTH_STORAGE_KEY, legacy);
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+    const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -42,11 +87,14 @@ export function getStoredAuth(): LoginResponse | null {
 }
 
 export function storeAuth(data: LoginResponse) {
-  localStorage.setItem('auth', JSON.stringify(data));
+  sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(data));
+  // Also remove any legacy localStorage entry on explicit store
+  localStorage.removeItem(AUTH_STORAGE_KEY);
 }
 
 export function clearAuth() {
-  localStorage.removeItem('auth');
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
 }
 
 function authHeaders(): Record<string, string> {
@@ -60,12 +108,19 @@ function authHeaders(): Record<string, string> {
 /**
  * Central fetch wrapper. If the server returns 401 (expired/invalid JWT),
  * it clears stored auth and redirects to /login so the user re-authenticates.
+ * Uses a soft client-side redirect so sessionStorage is not wiped on navigation.
  */
 async function apiFetch(url: string, options?: RequestInit): Promise<Response> {
   const res = await fetch(url, options);
   if (res.status === 401) {
     clearAuth();
-    window.location.href = '/login';
+    // Use replace so the user can't press Back into the protected page.
+    // window.location.replace is preferred over href to avoid a history entry,
+    // but we keep it within the SPA router by dispatching to the history API.
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', '/login');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
     throw new Error('Session expired. Please log in again.');
   }
   return res;

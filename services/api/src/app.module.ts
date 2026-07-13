@@ -31,12 +31,26 @@ import { CacheModule } from './cache/cache.module';
     SchedulingModule,
     BullModule.forRootAsync({
       imports: [NestConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        redis: {
-          host: configService.get('REDIS_URL', 'redis://localhost:6379').replace('redis://', ''),
-          port: 6379,
-        },
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const rawUrl = configService.get('REDIS_URL', 'redis://localhost:6379');
+        // GAP-07: Parse the Redis URL properly instead of fragile string replace.
+        // Supports redis://, rediss://, and authenticated redis://:pass@host:port URLs.
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(rawUrl);
+        } catch {
+          parsedUrl = new URL('redis://localhost:6379');
+        }
+        const redisConfig: Record<string, unknown> = {
+          host: parsedUrl.hostname || 'localhost',
+          port: parseInt(parsedUrl.port || '6379', 10),
+          tls: parsedUrl.protocol === 'rediss:' ? {} : undefined,
+        };
+        if (parsedUrl.password) {
+          redisConfig.password = decodeURIComponent(parsedUrl.password);
+        }
+        return { redis: redisConfig };
+      },
       inject: [ConfigService],
     }),
     HealthModule,

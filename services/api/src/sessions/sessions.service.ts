@@ -151,6 +151,10 @@ export class SessionsService {
     });
     this.logger.log(`[${roomId}] session-ended broadcast sent`);
 
+    // GAP-08: Purge in-memory signal state to prevent memory leaks across sessions.
+    // Do this after the broadcast so all connected clients receive the event first.
+    this.signalService.purgeRoom(roomId);
+
     return saved;
   }
 

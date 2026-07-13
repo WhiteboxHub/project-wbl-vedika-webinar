@@ -201,4 +201,23 @@ export class SignalService implements OnModuleDestroy {
     const data = await this.redis.hgetall(`signal:room:${roomId}`);
     return Object.values(data).map((v) => JSON.parse(v));
   }
+
+  /**
+   * GAP-08: Purge all in-memory and Redis state for a room after session ends.
+   * Call this from SessionsService.endSession() to prevent memory leaks in
+   * long-running processes that host many sequential webinars.
+   */
+  purgeRoom(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (room) {
+      // Remove every client in this room from the clients map
+      room.forEach((client) => {
+        this.clients.delete(client.participantId);
+      });
+      this.rooms.delete(roomId);
+      this.logger.log(`[${roomId}] Room purged from memory (${room.size} clients removed)`);
+    }
+    // Remove from Redis mirror (fire-and-forget)
+    this.redis.del(`signal:room:${roomId}`).catch(() => {});
+  }
 }

@@ -220,9 +220,18 @@ export class JoinService {
     }
 
     if (!user.emailVerified) {
-      // Re-trigger verification email if they attempt to join unverified
-      await this.emailService.sendVerificationEmail(user.id, userEmail, slug);
-      throw new BadRequestException('EMAIL_VERIFICATION_REQUIRED: Please verify your email first. We have sent a verification link to your inbox.');
+      // In dev (no SMTP configured), skip email verification so attendees can join immediately.
+      // In production with SMTP, the gate is enforced.
+      const smtpConfigured = Boolean(this.configService.get<string>('SMTP_HOST', ''));
+      if (!smtpConfigured) {
+        user.emailVerified = true;
+        await this.userRepository.save(user);
+        this.logger.warn(`[DEV] Auto-verified ${user.email} — set SMTP_HOST to enforce email verification in production.`);
+      } else {
+        // Re-trigger verification email if they attempt to join unverified
+        await this.emailService.sendVerificationEmail(user.id, userEmail, slug);
+        throw new BadRequestException('EMAIL_VERIFICATION_REQUIRED: Please verify your email first. We have sent a verification link to your inbox.');
+      }
     }
 
     const attendance = this.attendanceRepository.create({
@@ -304,10 +313,18 @@ export class JoinService {
 
     // Always send/resend verification email if the user is not yet verified
     if (!user.emailVerified) {
-      try {
-        await this.emailService.sendVerificationEmail(user.id, userEmail, slug);
-      } catch (emailErr) {
-        this.logger.warn(`Verification email failed for ${userEmail}: ${(emailErr as Error).message}`);
+      const smtpConfigured = Boolean(this.configService.get<string>('SMTP_HOST', ''));
+      if (!smtpConfigured) {
+        // Dev mode: auto-verify so the attendee doesn't get stuck in an uncompletable flow.
+        user.emailVerified = true;
+        await this.userRepository.save(user);
+        this.logger.warn(`[DEV] Auto-verified ${userEmail} on registration — set SMTP_HOST to enforce email verification.`);
+      } else {
+        try {
+          await this.emailService.sendVerificationEmail(user.id, userEmail, slug);
+        } catch (emailErr) {
+          this.logger.warn(`Verification email failed for ${userEmail}: ${(emailErr as Error).message}`);
+        }
       }
     } else {
       // If already verified, send the registration confirmation
@@ -356,6 +373,10 @@ export class JoinService {
       livekitToken = await this.tokenService.generateAttendeeToken(roomId, participantId, displayName);
     }
 
+    // GAP-01 fix: resolve the LiveKit WebSocket URL from env so attendees on any
+    // machine get the correct SFU address, not an empty string.
+    const livekitUrl = this.configService.get<string>('LIVEKIT_URL', 'ws://localhost:7880');
+
     return {
       participantId,
       roomId,
@@ -365,7 +386,7 @@ export class JoinService {
       signalToken,
       iceServers,
       livekitToken,
-      livekitUrl: '',
+      livekitUrl,
     };
   }
 

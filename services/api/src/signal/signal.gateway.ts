@@ -75,6 +75,14 @@ export class SignalGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   handleConnection(ws: WebSocket, _req: IncomingMessage) {
     ws.on('message', async (raw: Buffer | string) => {
+      // GAP-06: Reject oversized messages (>64 KB) to prevent memory exhaustion.
+      const byteLength = Buffer.isBuffer(raw) ? raw.length : Buffer.byteLength(raw as string, 'utf8');
+      if (byteLength > 65_536) {
+        this.logger.warn(`Oversized WS message (${byteLength} bytes) rejected`);
+        ws.close(1009, 'Message Too Big');
+        return;
+      }
+
       let msg: Msg;
       try { msg = JSON.parse(raw.toString()) as Msg; }
       catch { this.signal.sendDirect(ws, 'error', { message: 'Invalid JSON' }); return; }

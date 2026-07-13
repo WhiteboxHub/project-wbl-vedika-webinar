@@ -13,6 +13,6 @@ export class PollOptionEntity {
   text: string;
 
   @ManyToOne(() => PollEntity, (poll) => poll.options)
-  @JoinColumn({ name: 'pollId' })
+  @JoinColumn({ name: 'poll_id' })
   poll: PollEntity;
 }

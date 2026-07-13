@@ -11,6 +11,7 @@ import { InvitesModule } from '../invites/invites.module';
 import { LiveKitModule } from '../livekit/livekit.module';
 import { ParticipantsModule } from '../participants/participants.module';
 import { EmailModule } from '../email/email.module';
+import { RateLimitGuard } from '../common/rate-limit.guard';
 
 import { IceService } from './ice.service';
 
@@ -32,7 +33,7 @@ import { IceService } from './ice.service';
     }),
   ],
   controllers: [JoinController],
-  providers: [JoinService, IceService],
+  providers: [JoinService, IceService, RateLimitGuard],
   exports: [JoinService, IceService],
 })
 export class JoinModule {}

@@ -34,7 +34,7 @@ services:
 
   # ── Caddy — Single Entry Point ───────────────────────────────────────────
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.8-alpine
     container_name: webinar-caddy
     restart: unless-stopped
     ports:
@@ -65,7 +65,7 @@ services:
 
   # ── PostgreSQL ───────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.3-alpine
     container_name: webinar-postgres
     restart: unless-stopped
     environment:
@@ -86,7 +86,7 @@ services:
 
   # ── Redis ────────────────────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: webinar-redis
     restart: unless-stopped
     ports:
@@ -103,7 +103,7 @@ services:
 
   # ── LiveKit SFU ──────────────────────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.7.2
     container_name: webinar-livekit
     restart: unless-stopped
     command: --config /etc/livekit.yaml
@@ -125,7 +125,7 @@ services:
 
   # ── MinIO (S3-compatible object storage) ─────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
     container_name: webinar-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -147,7 +147,7 @@ services:
 
   # ── coturn (TURN server — helps attendees behind strict NAT) ─────────────
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.2
     container_name: webinar-coturn
     restart: unless-stopped
     ports:
@@ -166,6 +166,17 @@ services:
       --total-quota=100
       --stale-nonce
       --no-cli
+    networks:
+      - webinar
+
+  # ── Mailpit (local SMTP + web UI — catches all dev emails) ──────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: webinar-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"    # SMTP — NestJS sends here in dev
+      - "8025:8025"    # Web UI — open http://localhost:8025 to read emails
     networks:
       - webinar
 
