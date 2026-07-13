@@ -10,7 +10,12 @@ export class EmailController {
     if (!token) throw new BadRequestException('Token required');
     try {
       const result = await this.email.verifyEmailToken(token);
-      return { verified: true, userId: result.userId };
+      return {
+        verified: true,
+        userId: result.userId,
+        name: result.name,
+        email: result.email,
+      };
     } catch {
       throw new BadRequestException('Invalid or expired token');
     }

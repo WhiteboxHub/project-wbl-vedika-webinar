@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Vedika Webinar — Caddyfile
+#
+# Single entry point for ALL traffic. Caddy runs on port 80 inside Docker and
+# routes every request to the right backend service.
+#
+# Attendees open:   http://{APP_HOST}/w/{slug}     ← slug changes per session
+# Host dashboard:   http://{APP_HOST}/dashboard
+# API:              http://{APP_HOST}/api/*         → NestJS :3000
+# Signal WS:        ws://{APP_HOST}/signal          → NestJS :3000
+# LiveKit WS:       ws://{APP_HOST}/livekit         → LiveKit :7880
+#
+# To enable HTTPS with a real domain: remove the `auto_https off` block below
+# and Caddy will auto-provision a Let's Encrypt certificate.
+# ─────────────────────────────────────────────────────────────────────────────
+
+{
+    # Disable automatic HTTPS when running on a bare IP address (LAN dev).
+    # Delete this block when you have a real domain — Caddy handles certs automatically.
+    auto_https off
+    admin off
+}
+
+{$APP_HOST}:{$APP_PORT:80} {
+
+    log {
+        output stdout
+        level  INFO
+        format console
+    }
+
+    # ── 1. NestJS WebSocket signal gateway (/signal) ──────────────────────────
+    # Must be declared before the /api block so it isn't caught by the prefix match.
+    @signal {
+        path /signal
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    handle @signal {
+        reverse_proxy {$API_UPSTREAM:host.docker.internal:3000} {
+            header_up Host              {host}
+            header_up X-Real-IP        {remote_host}
+            header_up X-Forwarded-For  {remote_host}
+        }
+    }
+
+    # Also handle signal upgrade without the Upgrade header matcher
+    # (some WS clients send the upgrade differently)
+    handle /signal {
+        reverse_proxy {$API_UPSTREAM:host.docker.internal:3000} {
+            header_up Host             {host}
+            header_up X-Real-IP       {remote_host}
+        }
+    }
+
+    # ── 2. NestJS REST API (/api/*) ───────────────────────────────────────────
+    # Strip the /api prefix — NestJS routes are defined without it (e.g. GET /sessions).
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy {$API_UPSTREAM:host.docker.internal:3000} {
+            header_up Host             {host}
+            header_up X-Real-IP       {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    # ── 3. LiveKit WebRTC signaling (/livekit) ────────────────────────────────
+    # Strip the /livekit prefix — LiveKit's native WS endpoint is at /.
+    handle /livekit* {
+        uri strip_prefix /livekit
+        reverse_proxy {$LIVEKIT_UPSTREAM:host.docker.internal:7880}
+    }
+
+    # ── 4. React frontend — everything else ──────────────────────────────────
+    # Vite dev server in development, or a static file server in production.
+    handle {
+        reverse_proxy {$FRONTEND_UPSTREAM:host.docker.internal:5173} {
+            header_up Host {host}
+        }
+    }
+}

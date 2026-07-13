@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDate, IsInt, Min, Max, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsDate, IsInt, Min, Max, MaxLength, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateSessionRequest } from '@webinar/shared';
 
@@ -20,4 +20,27 @@ export class CreateSessionDto implements CreateSessionRequest {
   @Min(1)
   @Max(1000)
   maxAttendees?: number;
+
+  @IsOptional()
+  @IsDate()
+  @Type(() => Date)
+  scheduledStartAt?: Date;
+
+  @IsOptional()
+  @IsDate()
+  @Type(() => Date)
+  scheduledEndAt?: Date;
+
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  duration?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoStart?: boolean;
 }

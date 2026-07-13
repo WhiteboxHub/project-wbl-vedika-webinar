@@ -47,17 +47,28 @@ import {
 } from '../lib/api';
 import {
   loadClassroomSession, clearClassroomSession,
-  getLiveKitUrl, getSignalServerUrl, type WebinarSessionData,
-  loadWebinarSession,
+  getLiveKitUrl, getSignalServerUrl,
 } from '../lib/classroom-session';
-import NativeClassroomView from './NativeClassroomView';
 import { SignalingClient, ReactionType } from '../lib/signaling';
 import PollPanel, { PollData, PollResult } from './classroom/PollPanel';
 import QAPanel, { QuestionData } from './classroom/QAPanel';
 import ReactionBar from './classroom/ReactionBar';
-import { LIVEKIT_MIC_OPTIONS } from '../lib/webrtc/audio-constraints';
 
-const USE_NATIVE_WEBRTC = (import.meta as any).env?.VITE_USE_NATIVE_WEBRTC === 'true';
+/** Microphone options for LiveKit (inlined from removed webrtc/audio-constraints) */
+const LIVEKIT_MIC_OPTIONS = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  sampleRate: 48000,
+  channelCount: 1, // mono — avoids conflict with per-device stereo limitations
+};
+
+/** True when the browser allows getUserMedia (https or localhost) */
+const IS_SECURE_CONTEXT = typeof window !== 'undefined' && (
+  window.isSecureContext ||
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -140,10 +151,12 @@ interface SigCtx {
 
 // ─── Recording hook ───────────────────────────────────────────────────────────
 
-function useRecording(onStatus: (r: boolean) => void) {
+function useRecording(onStatus: (r: boolean) => void, onStopped?: () => void) {
   const mrRef   = useRef<MediaRecorder | null>(null);
   const chunks  = useRef<Blob[]>([]);
   const [busy, setBusy] = useState(false);
+  const onStoppedRef = useRef(onStopped);
+  useEffect(() => { onStoppedRef.current = onStopped; }, [onStopped]);
 
   const start = useCallback(async () => {
     setBusy(true);
@@ -168,7 +181,10 @@ function useRecording(onStatus: (r: boolean) => void) {
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
         onStatus(false);
+        // Notify caller so it can broadcast recording-stopped to attendees
+        onStoppedRef.current?.();
       };
+      // Auto-stop when user dismisses the OS screen picker
       stream.getVideoTracks()[0].addEventListener('ended', () => stop());
       mr.start(1000);
       mrRef.current = mr;
@@ -195,17 +211,33 @@ function useRecording(onStatus: (r: boolean) => void) {
 function ClassroomInner(ctx: SigCtx) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const connectionState = useConnectionState();
-  const [micError, setMicError] = useState<string | null>(null);
+  const [micError, setMicError] = useState<React.ReactNode>(null);
+
+  // Build secure-context help link pointing to current hostname (not hardcoded localhost)
+  const secureContextLink = typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:5173`
+    : 'http://localhost:5173';
 
   // Auto-enable mic when host approves or role is promoted
   useEffect(() => {
     if (ctx.micEnableNonce === 0) return;
     if (ctx.audioState !== 'approved') return;
+    if (!IS_SECURE_CONTEXT) {
+      setMicError(
+        <>
+          Microphone requires a secure context. Use{' '}
+          <a href={secureContextLink} style={{ color: '#93c5fd', textDecoration: 'underline' }}>{secureContextLink}</a>
+        </>
+      );
+      return;
+    }
     void localParticipant.setMicrophoneEnabled(true, LIVEKIT_MIC_OPTIONS as any).catch((e: any) => {
       const name = (e?.name ?? '').toLowerCase();
       setMicError(
         name === 'notallowederror'
           ? 'Microphone access denied — allow it in your browser and try again.'
+          : name === 'notfounderror'
+          ? 'No microphone found. Plug one in and try again.'
           : `Microphone error: ${e?.message ?? 'unknown'}`,
       );
     });
@@ -214,25 +246,28 @@ function ClassroomInner(ctx: SigCtx) {
   // Apply server-authoritative mute from host (LiveKit REST or signal broadcast)
   useEffect(() => {
     if (ctx.serverMuteNonce === 0) return;
+    if (!IS_SECURE_CONTEXT) return;
     void localParticipant.setMicrophoneEnabled(!ctx.serverMuted, LIVEKIT_MIC_OPTIONS as any).catch(() => {});
   }, [ctx.serverMuteNonce, ctx.serverMuted, localParticipant]);
 
-  // Re-publish mic after LiveKit reconnects
+  // Re-publish mic after LiveKit reconnects — deps include all consumed state so no stale closure
   useEffect(() => {
     if (connectionState !== ConnectionState.Connected) return;
     if (ctx.audioState !== 'approved' && !ctx.isHost) return;
     if (!isMicrophoneEnabled) return;
+    if (!IS_SECURE_CONTEXT) return;
     void localParticipant.setMicrophoneEnabled(true, LIVEKIT_MIC_OPTIONS as any).catch(() => {});
-  }, [connectionState]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionState, ctx.audioState, ctx.isHost, isMicrophoneEnabled, localParticipant]);
 
   const screenTracks = useTracks(
     [{ source: Track.Source.ScreenShare, withPlaceholder: false }],
     { onlySubscribed: true },
   );
 
-  // Track whether WE are sharing (local participant's own screen share pub)
-  const myScreenPub = localParticipant?.getTrackPublication(Track.Source.ScreenShare);
-  const isSharing   = !!myScreenPub?.track;
+  // Track whether WE are sharing — derive from the reactive screenTracks hook rather
+  // than getTrackPublication() which is NOT reactive and won't trigger re-renders.
+  const isSharing = screenTracks.some(t => t.participant.isLocal);
 
   // Remote screen share takes priority; then local (so host sees what attendees see)
   const remoteScreen = screenTracks.find(t => !t.participant.isLocal) ?? null;
@@ -250,6 +285,15 @@ function ClassroomInner(ctx: SigCtx) {
 
   const toggleMic = useCallback(async () => {
     try {
+      if (!IS_SECURE_CONTEXT) {
+        setMicError(
+          <>
+            Microphone requires a secure context. Use{' '}
+            <a href={secureContextLink} style={{ color: '#93c5fd', textDecoration: 'underline' }}>{secureContextLink}</a>
+          </>
+        );
+        return;
+      }
       await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, LIVEKIT_MIC_OPTIONS as any);
     } catch (e: any) {
       const name = (e?.name ?? '').toLowerCase();
@@ -261,7 +305,7 @@ function ClassroomInner(ctx: SigCtx) {
           : `Microphone error: ${e?.message ?? 'unknown'}`,
       );
     }
-  }, [localParticipant, isMicrophoneEnabled]);
+  }, [localParticipant, isMicrophoneEnabled, secureContextLink]);
 
   // ── Screen share toggle ────────────────────────────────────────────────────
   const [shareLoading, setShareLoading] = useState(false);
@@ -270,6 +314,11 @@ function ClassroomInner(ctx: SigCtx) {
     if (shareLoading) return;
     setShareLoading(true);
     try {
+      if (!IS_SECURE_CONTEXT) {
+        setShareError('Screen sharing requires a secure context. Use http://localhost:5173');
+        setShareLoading(false);
+        return;
+      }
       if (isSharing) {
         await localParticipant.setScreenShareEnabled(false);
       } else {
@@ -921,13 +970,6 @@ export default function Classroom() {
   const location    = useLocation();
   const navigate    = useNavigate();
 
-  // ── Native WebRTC branch ──────────────────────────────────────────────────
-  const nativeSess = USE_NATIVE_WEBRTC
-    ? ((location.state as WebinarSessionData) || (roomId ? loadWebinarSession(roomId) : null))
-    : null;
-  if (USE_NATIVE_WEBRTC && nativeSess?.grant) {
-    return <NativeClassroomView grant={nativeSess.grant} isHost={nativeSess.isHost}/>;
-  }
 
   // ── Session data ──────────────────────────────────────────────────────────
   const sessionData = useMemo(
@@ -966,7 +1008,9 @@ export default function Classroom() {
   // ── Audio state ───────────────────────────────────────────────────────────
   const [audioState,    setAudioState]    = useState<AudioSt>(isHost ? 'approved' : 'none');
   const [audioRequests, setAudioRequests] = useState<any[]>([]);
-  const [micEnableNonce, setMicEnableNonce]   = useState(0);
+  // Hosts start with nonce=1 so the auto-enable effect fires immediately on mount.
+  // Attendees start at 0 so the effect is skipped until the host approves their mic.
+  const [micEnableNonce, setMicEnableNonce]   = useState(isHost ? 1 : 0);
   const [serverMuteNonce, setServerMuteNonce] = useState(0);
   const [serverMuted, setServerMuted]         = useState(false);
 
@@ -985,10 +1029,24 @@ export default function Classroom() {
 
   // ── Recording ─────────────────────────────────────────────────────────────
   const [isRecording, setIsRecording] = useState(false);
-  const { start: startRec, stop: stopRec, busy: recBusy } = useRecording(setIsRecording);
+
+  // When the OS screen-capture track ends (user hit Stop Share in system UI),
+  // we also need to broadcast that recording has stopped so attendees' REC badges clear.
+  const handleRecordingStopped = useCallback(() => {
+    setIsRecording(false);
+    sigRef.current?.broadcastRecordingStatus(false);
+  }, []);
+
+  const { start: startRec, stop: stopRec, busy: recBusy } = useRecording(setIsRecording, handleRecordingStopped);
+
   const toggleRec = useCallback(() => {
-    if (isRecording) { stopRec(); setIsRecording(false); }
-    else startRec();
+    if (isRecording) {
+      stopRec();
+      setIsRecording(false);
+      sigRef.current?.broadcastRecordingStatus(false);
+    } else {
+      startRec();
+    }
   }, [isRecording, startRec, stopRec]);
 
   // ── Signal setup ──────────────────────────────────────────────────────────
@@ -1184,7 +1242,11 @@ export default function Classroom() {
       <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: SHELL }}>
         <LiveKitRoom
           token={liveKitToken} serverUrl={livekitUrl}
-          video={false} audio={isHost} connect={true}
+          video={false}
+          // audio=false: mic is enabled by the nonce-based useEffect in ClassroomInner
+          // using LIVEKIT_MIC_OPTIONS. Letting LiveKit auto-enable here would race with
+          // our controlled enable and use different (default) constraints.
+          audio={false} connect={true}
           data-lk-theme="default"
           connectOptions={{ autoSubscribe: true }}
           options={{
@@ -1198,7 +1260,8 @@ export default function Classroom() {
               videoCodec: 'vp9',
               dtx: false,
               stopMicTrackOnMute: false,
-              forceStereo: true,              // stereo mic when browser supports it
+              // NOTE: forceStereo removed — conflicts with LIVEKIT_MIC_OPTIONS channelCount:1
+              // and causes capture failures on devices that don't support stereo.
               // Max screen-share bitrate for 4K fidelity
               screenShareEncoding: { maxBitrate: 10_000_000, maxFramerate: 30 },
             },
@@ -1207,7 +1270,7 @@ export default function Classroom() {
               noiseSuppression:  true,
               autoGainControl:   true,
               sampleRate:        48000,  // CD-quality sample rate
-              channelCount:      2,      // stereo capture
+              channelCount:      1,      // mono — matches LIVEKIT_MIC_OPTIONS, avoids device conflicts
             },
             videoCaptureDefaults: {
               resolution: VideoPresets.h2160.resolution,  // 4K camera capture

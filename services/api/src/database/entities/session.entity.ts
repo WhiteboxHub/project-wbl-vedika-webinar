@@ -15,6 +15,10 @@ export class SessionEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Human-readable, permanent URL slug (e.g., "bright-summit-4829") */
+  @Column({ length: 50, unique: true, nullable: true })
+  slug?: string;
+
   @Column({ length: 255 })
   title: string;
 
@@ -37,6 +41,30 @@ export class SessionEntity {
 
   @Column({ name: 'scheduled_at' })
   scheduledAt: Date;
+
+  /** Precise start time with timezone awareness (for scheduling) */
+  @Column({ name: 'scheduled_start_at', nullable: true })
+  scheduledStartAt?: Date;
+
+  /** Precise end time (for auto-end and duration display) */
+  @Column({ name: 'scheduled_end_at', nullable: true })
+  scheduledEndAt?: Date;
+
+  /** IANA timezone string (e.g., "America/New_York") */
+  @Column({ length: 100, nullable: true })
+  timezone?: string;
+
+  /** Duration in minutes */
+  @Column({ type: 'int', nullable: true })
+  duration?: number;
+
+  /** Whether to auto-start the session at scheduledStartAt */
+  @Column({ name: 'auto_start', default: false })
+  autoStart: boolean;
+
+  /** Recurring pattern: null=one-time, 'daily', 'weekly', 'custom' */
+  @Column({ name: 'recurring_pattern', length: 50, nullable: true })
+  recurringPattern?: string;
 
   @Column({ name: 'started_at', nullable: true })
   startedAt?: Date;

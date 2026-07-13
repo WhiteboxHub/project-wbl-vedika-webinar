@@ -13,11 +13,13 @@ import { SignalModule } from './signal/signal.module';
 import { ParticipantsModule } from './participants/participants.module';
 import { HandsModule } from './hands/hands.module';
 import { EmailModule } from './email/email.module';
-import { QaModule } from './qa/qa.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
+import { CacheModule } from './cache/cache.module';
 
 @Module({
   imports: [
     ConfigModule,
+    CacheModule,
     DatabaseModule,
     AuthModule,
     SessionsModule,
@@ -26,15 +28,29 @@ import { QaModule } from './qa/qa.module';
     ParticipantsModule,
     HandsModule,
     EmailModule,
-    QaModule,
+    SchedulingModule,
     BullModule.forRootAsync({
       imports: [NestConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        redis: {
-          host: configService.get('REDIS_URL', 'redis://localhost:6379').replace('redis://', ''),
-          port: 6379,
-        },
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const rawUrl = configService.get('REDIS_URL', 'redis://localhost:6379');
+        // GAP-07: Parse the Redis URL properly instead of fragile string replace.
+        // Supports redis://, rediss://, and authenticated redis://:pass@host:port URLs.
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(rawUrl);
+        } catch {
+          parsedUrl = new URL('redis://localhost:6379');
+        }
+        const redisConfig: Record<string, unknown> = {
+          host: parsedUrl.hostname || 'localhost',
+          port: parseInt(parsedUrl.port || '6379', 10),
+          tls: parsedUrl.protocol === 'rediss:' ? {} : undefined,
+        };
+        if (parsedUrl.password) {
+          redisConfig.password = decodeURIComponent(parsedUrl.password);
+        }
+        return { redis: redisConfig };
+      },
       inject: [ConfigService],
     }),
     HealthModule,

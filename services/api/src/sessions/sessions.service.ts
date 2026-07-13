@@ -26,13 +26,20 @@ export class SessionsService {
     data: CreateSessionRequest,
   ): Promise<SessionEntity> {
     const inviteToken = this.generateInviteToken();
+    const slug = this.generateSlug(data.title);
 
     const session = this.sessionRepository.create({
       title: data.title,
+      slug,
       description: data.description,
       instructorId,
       status: SessionStatus.SCHEDULED,
       scheduledAt: data.scheduledAt,
+      scheduledStartAt: data.scheduledStartAt ?? data.scheduledAt,
+      scheduledEndAt: data.scheduledEndAt,
+      timezone: data.timezone,
+      duration: data.duration,
+      autoStart: data.autoStart ?? false,
       liveKitRoomName: 'pending',
       inviteToken,
       maxAttendees: data.maxAttendees || 100,
@@ -144,6 +151,10 @@ export class SessionsService {
     });
     this.logger.log(`[${roomId}] session-ended broadcast sent`);
 
+    // GAP-08: Purge in-memory signal state to prevent memory leaks across sessions.
+    // Do this after the broadcast so all connected clients receive the event first.
+    this.signalService.purgeRoom(roomId);
+
     return saved;
   }
 
@@ -174,5 +185,29 @@ export class SessionsService {
 
   private generateInviteToken(): string {
     return randomBytes(32).toString('base64url');
+  }
+
+  /** Generate a URL-safe slug from title + random suffix */
+  private generateSlug(title: string): string {
+    const base = title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .substring(0, 30);
+    const suffix = Math.floor(1000 + Math.random() * 9000);
+    return `${base}-${suffix}`;
+  }
+
+  async findBySlug(slug: string): Promise<SessionEntity> {
+    const session = await this.sessionRepository.findOne({
+      where: { slug },
+      relations: ['instructor'],
+    });
+    if (!session) {
+      throw new NotFoundException(`Session with slug "${slug}" not found`);
+    }
+    return session;
   }
 }

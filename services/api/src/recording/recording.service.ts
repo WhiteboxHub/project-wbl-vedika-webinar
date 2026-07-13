@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
@@ -45,6 +46,11 @@ export class RecordingService {
 
     if (!session) {
       throw new NotFoundException(`Session ${sessionId} not found`);
+    }
+
+    // GAP-04: Only the session instructor may start a recording.
+    if (userId && session.instructorId !== userId) {
+      throw new ForbiddenException('Only the session instructor can start a recording');
     }
 
     if (session.status !== SessionStatus.LIVE) {
@@ -131,6 +137,11 @@ export class RecordingService {
 
     if (!session) {
       throw new NotFoundException(`Session ${sessionId} not found`);
+    }
+
+    // GAP-04: Only the session instructor may stop a recording.
+    if (userId && session.instructorId !== userId) {
+      throw new ForbiddenException('Only the session instructor can stop a recording');
     }
 
     const recording = await this.recordingRepository.findOne({

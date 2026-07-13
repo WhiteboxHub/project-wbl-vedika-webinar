@@ -8,17 +8,20 @@
     "services/*"
   ],
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "clean": "turbo run clean && rm -rf node_modules",
-    "docker:up": "node scripts/configure-livekit.mjs && docker compose up -d",
+    "docker:up": "node scripts/setup.mjs && docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "docker:configure-livekit": "node scripts/configure-livekit.mjs",
+    "docker:caddy:logs": "docker compose logs -f caddy",
+    "docker:reload": "docker compose restart caddy",
     "dev:client": "pnpm --filter @webinar/desktop-client dev",
-    "tunnel": "npx cloudflared tunnel --url http://localhost:5173"
+    "dev:api": "pnpm --filter @webinar/api dev",
+    "startup": "node scripts/startup.mjs"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

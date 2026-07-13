@@ -1,72 +1,155 @@
 version: '3.9'
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Vedika Webinar — Infrastructure Stack
+#
+# What this runs:
+#   caddy     → Reverse proxy.  The ONLY port exposed to your LAN (port 80).
+#               Routes /api/* → NestJS, /signal → NestJS WS, /livekit → LiveKit,
+#               /* → Vite dev server (or built frontend).
+#
+#   postgres  → Database.       Internal only.
+#   redis     → Session cache.  Internal only.
+#   livekit   → WebRTC SFU.     Internal for WS signaling (via Caddy /livekit).
+#               UDP ports 50000-50020 exposed for WebRTC media (peer-to-peer).
+#   minio     → Object storage. Internal only.
+#   coturn    → TURN server.    Helps attendees behind strict NAT.
+#
+# Your app code (NestJS API + Vite frontend) runs via `pnpm dev` on your host
+# machine. Caddy proxies to them via host.docker.internal.
+#
+# One-command start:
+#   pnpm setup          ← auto-detect LAN IP, write .env
+#   pnpm docker:up      ← start infra + caddy
+#   pnpm dev            ← start API + frontend with hot reload
+#
+# Attendees open:  http://{APP_HOST}/w/{slug}
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  webinar:
+    driver: bridge
+
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: webinar-postgres
+
+  # ── Caddy — Single Entry Point ───────────────────────────────────────────
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: webinar-caddy
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:80"
+      - "443:443"            # reserved for when you add a real domain
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     environment:
-      POSTGRES_DB: webinar_db
-      POSTGRES_USER: webinar
+      APP_HOST:      ${APP_HOST:-localhost}
+      APP_PORT:      80
+      # These tell Caddy where to find your dev servers running on the host machine.
+      # On Windows/Mac Docker Desktop, host.docker.internal resolves automatically.
+      # On Linux it is resolved via extra_hosts below.
+      API_UPSTREAM:      host.docker.internal:3000
+      LIVEKIT_UPSTREAM:  host.docker.internal:7880
+      FRONTEND_UPSTREAM: host.docker.internal:5173
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux compat — no-op on Windows/Mac
+    networks:
+      - webinar
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16.3-alpine
+    container_name: webinar-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       webinar_db
+      POSTGRES_USER:     webinar
       POSTGRES_PASSWORD: webinar
     ports:
-      - "5444:5432"
+      - "5444:5432"      # exposed so NestJS on host can connect
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - webinar
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U webinar"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # ── Redis ────────────────────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: webinar-redis
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6379:6379"      # exposed so NestJS on host can connect
     volumes:
       - redis_data:/data
+    networks:
+      - webinar
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
 
+  # ── LiveKit SFU ──────────────────────────────────────────────────────────
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.7.2
     container_name: webinar-livekit
+    restart: unless-stopped
     command: --config /etc/livekit.yaml
     ports:
-      - "7880:7880"          # HTTP / WebSocket signaling
-      - "7881:7881"          # TCP WebRTC fallback
-      - "3479:3479/udp"      # LiveKit embedded TURN (UDP)
-      - "3479:3479/tcp"      # LiveKit embedded TURN (TCP)
-      - "50000-50020:50000-50020/udp"  # UDP media (21 ports, matches livekit.yaml)
+      # WebSocket signaling NOT exposed — Caddy proxies /livekit → this container
+      # internally (via docker network). No direct LAN access to 7880.
+      - "7880:7880"            # kept for Vite dev proxy (localhost:7880 direct)
+      - "7881:7881"            # TCP WebRTC fallback
+      - "3479:3479/udp"        # Embedded TURN UDP
+      - "3479:3479/tcp"        # Embedded TURN TCP
+      - "50000-50020:50000-50020/udp"   # WebRTC media (ICE candidates point here)
     volumes:
-      - ./docker/livekit.yaml:/etc/livekit.yaml
+      - ./docker/livekit.yaml:/etc/livekit.yaml:ro
+    networks:
+      - webinar
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
+  # ── MinIO (S3-compatible object storage) ─────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
     container_name: webinar-minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_USER:     minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
       - "9000:9000"
-      - "9001:9001"
+      - "9001:9001"      # MinIO web console
     volumes:
       - minio_data:/data
+    networks:
+      - webinar
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # ── coturn (TURN server — helps attendees behind strict NAT) ─────────────
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.2
     container_name: webinar-coturn
+    restart: unless-stopped
     ports:
       - "3478:3478/udp"
       - "3478:3478/tcp"
@@ -78,12 +161,28 @@ services:
       --lt-cred-mech
       --use-auth-secret
       --static-auth-secret=webinar-turn-secret-change-me
-      --realm=webinar.local
+      --realm=${APP_HOST:-webinar.local}
+      --external-ip=${APP_HOST:-127.0.0.1}
       --total-quota=100
       --stale-nonce
       --no-cli
+    networks:
+      - webinar
+
+  # ── Mailpit (local SMTP + web UI — catches all dev emails) ──────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: webinar-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"    # SMTP — NestJS sends here in dev
+      - "8025:8025"    # Web UI — open http://localhost:8025 to read emails
+    networks:
+      - webinar
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  caddy_data:
+  caddy_config:

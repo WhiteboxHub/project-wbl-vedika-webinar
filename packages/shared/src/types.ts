@@ -52,11 +52,18 @@ export enum SessionStatus {
 
 export interface Session {
   id: string;
+  slug?: string;
   title: string;
   description?: string;
   instructorId: string;
   status: SessionStatus;
   scheduledAt: Date;
+  scheduledStartAt?: Date;
+  scheduledEndAt?: Date;
+  timezone?: string;
+  duration?: number;
+  autoStart?: boolean;
+  recurringPattern?: string;
   startedAt?: Date;
   endedAt?: Date;
   liveKitRoomName: string;
@@ -70,16 +77,24 @@ export interface CreateSessionRequest {
   title: string;
   description?: string;
   scheduledAt: Date;
+  scheduledStartAt?: Date;
+  scheduledEndAt?: Date;
+  timezone?: string;
+  duration?: number;
+  autoStart?: boolean;
   maxAttendees?: number;
 }
 
 export interface CreateSessionResponse {
   id: string;
+  slug?: string;
   title: string;
   description?: string;
   instructorId: string;
   status: SessionStatus;
   scheduledAt: Date;
+  scheduledStartAt?: Date;
+  scheduledEndAt?: Date;
   liveKitRoomName: string;
   maxAttendees: number;
   inviteToken: string;
@@ -118,6 +133,7 @@ export interface CreateInviteResponse {
   token: string;
   expiresAt: Date;
   inviteUrl: string;
+  slug?: string;
 }
 
 export interface ResolveInviteRequest {
@@ -126,14 +142,30 @@ export interface ResolveInviteRequest {
 
 export interface ResolveInviteResponse {
   sessionId: string;
+  slug?: string;
   title: string;
   description?: string;
   scheduledAt: Date;
+  scheduledStartAt?: Date;
+  scheduledEndAt?: Date;
   status: SessionStatus;
   instructorName: string;
   maxAttendees: number;
   registeredName?: string;
   registeredEmail?: string;
+}
+
+export interface SlugResolveResponse {
+  sessionId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  scheduledAt: Date;
+  scheduledStartAt?: Date;
+  scheduledEndAt?: Date;
+  status: SessionStatus;
+  instructorName: string;
+  maxAttendees: number;
 }
 
 // Recording types

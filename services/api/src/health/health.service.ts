@@ -43,6 +43,35 @@ export class HealthService {
       overallStatus = 'error';
     }
 
+    // GAP-18: Check LiveKit SFU availability
+    // Non-critical: LiveKit unavailable should not mark the API as fully down.
+    try {
+      const livekitUrl = this.configService.get<string>('LIVEKIT_URL', 'ws://localhost:7880');
+      const httpUrl = livekitUrl.replace(/^ws(s?):\/\//, 'http$1://');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`${httpUrl}/rtc/validate`, { signal: controller.signal }).catch(() => null);
+      clearTimeout(timeout);
+      // LiveKit returns various codes depending on version; any sub-500 means server is alive.
+      services.livekit = (res && res.status < 500) ? 'ok' : 'error';
+    } catch {
+      services.livekit = 'error';
+      this.logger.warn('LiveKit health check failed (non-critical)');
+    }
+
+    // GAP-18: Check MinIO object storage availability
+    try {
+      const minioUrl = this.configService.get<string>('MINIO_ENDPOINT', 'http://localhost:9000');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`${minioUrl}/minio/health/live`, { signal: controller.signal }).catch(() => null);
+      clearTimeout(timeout);
+      services.storage = (res && res.status < 500) ? 'ok' : 'error';
+    } catch {
+      services.storage = 'error';
+      this.logger.warn('MinIO health check failed (non-critical)');
+    }
+
     return {
       status: overallStatus,
       timestamp: new Date().toISOString(),

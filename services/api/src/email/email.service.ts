@@ -74,7 +74,7 @@ export class EmailService {
   }
 
   /** Send email verification link (logs in dev when SMTP not configured) */
-  async sendVerificationEmail(userId: string, email: string): Promise<void> {
+  async sendVerificationEmail(userId: string, email: string, slug?: string): Promise<void> {
     const token = randomBytes(32).toString('hex');
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -84,7 +84,9 @@ export class EmailService {
     );
 
     const baseUrl = this.config.get<string>('PUBLIC_APP_URL', 'http://localhost:5173');
-    const link = `${baseUrl}/verify-email?token=${token}`;
+    const link = slug
+      ? `${baseUrl}/verify-email?token=${token}&slug=${slug}`
+      : `${baseUrl}/verify-email?token=${token}`;
 
     await this.deliver(
       email,
@@ -94,7 +96,49 @@ export class EmailService {
     );
   }
 
-  async verifyEmailToken(token: string): Promise<{ userId: string }> {
+  /** Send magic-link sign-in email (organizer login) */
+  async sendMagicLinkEmail(email: string, token: string, verifyUrl: string): Promise<void> {
+    const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #1a1a2e; max-width: 600px; margin: 0 auto; padding: 24px;">
+  <div style="background: linear-gradient(135deg, #2563eb, #7c3aed); padding: 24px; border-radius: 12px 12px 0 0;">
+    <h1 style="color: #fff; margin: 0; font-size: 22px;">Vedika Webinar Platform</h1>
+    <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0;">Sign-in verification code</p>
+  </div>
+  <div style="background: #f8f9fc; padding: 28px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px;">
+    <p>Hi,</p>
+    <p>We received a sign-in request for <strong>${email}</strong>. Use the button below to sign in — this link expires in <strong>15 minutes</strong>.</p>
+    <p style="text-align: center; margin: 32px 0;">
+      <a href="${verifyUrl}" style="background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; display: inline-block; font-size: 16px;">
+        ✅ Sign in to Organizer Portal
+      </a>
+    </p>
+    <p style="font-size: 13px; color: #64748b;">Or copy your verification token and paste it into the login page:</p>
+    <div style="background: #1e293b; border-radius: 8px; padding: 16px; margin: 12px 0; font-family: monospace; font-size: 12px; color: #94a3b8; word-break: break-all;">
+      ${token}
+    </div>
+    <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">If you didn't request this, you can safely ignore this email.</p>
+  </div>
+</body>
+</html>`;
+
+    const text = [
+      `Sign in to Vedika Webinar Platform`,
+      ``,
+      `Click here to sign in: ${verifyUrl}`,
+      ``,
+      `Or paste this token into the login page:`,
+      token,
+      ``,
+      `This link expires in 15 minutes.`,
+      `If you didn't request this, ignore this email.`,
+    ].join('\n');
+
+    await this.deliver(email, '🔑 Your sign-in link — Vedika Webinar', html, text);
+  }
+
+  async verifyEmailToken(token: string): Promise<{ userId: string; name: string; email: string }> {
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const row = await this.verificationRepo.findOne({
       where: { tokenHash },
@@ -106,7 +150,13 @@ export class EmailService {
     row.verifiedAt = new Date();
     await this.verificationRepo.save(row);
     await this.userRepo.update(row.userId, { emailVerified: true });
-    return { userId: row.userId };
+
+    const user = await this.userRepo.findOne({ where: { id: row.userId } });
+    return {
+      userId: row.userId,
+      name: user?.name ?? '',
+      email: user?.email ?? '',
+    };
   }
 
   private formatDateTime(d: Date): string {
